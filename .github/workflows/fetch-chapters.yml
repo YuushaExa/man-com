@@ -1,4 +1,4 @@
-name: Fetch Manga Chapters
+name: Fetch Manga Chapters (Playwright)
 
 on:
   workflow_dispatch:
@@ -7,45 +7,27 @@ jobs:
   fetch-chapters:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Fetch chapters with browser headers
-        id: api_call
-        run: |
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
-            -H "Accept: application/json, text/plain, */*" \
-            -H "Accept-Language: en-US,en;q=0.9" \
-            -H "Accept-Encoding: gzip, deflate, br" \
-            -H "Connection: keep-alive" \
-            -H "Sec-Fetch-Dest: empty" \
-            -H "Sec-Fetch-Mode: cors" \
-            -H "Sec-Fetch-Site: same-origin" \
-            "https://comix.to/api/v2/manga/93q1r/chapters?limit=100&page=1")
-          
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-          
-          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
-          echo "response<<EOF" >> $GITHUB_ENV
-          echo "$BODY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          
-          if [ "$HTTP_CODE" -ne 200 ]; then
-            echo "❌ Request failed with HTTP $HTTP_CODE"
-            # Check if it's Cloudflare challenge
-            if echo "$BODY" | grep -q "Just a moment"; then
-              echo "⚠️ Cloudflare challenge detected - headers not enough"
-            fi
-            echo "$BODY" | head -c 500
-            exit 1
-          fi
-          
-          echo "✅ Request successful"
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
-      - name: Parse and display chapters
-        if: success()
+      - name: Install Playwright + dependencies
         run: |
-          echo "📚 Found $(echo "$response" | jq -r '.result.items | length') chapters"
-          echo "$response" | jq -r '.result.items[] | "- Chapter \(.number): \(.name // "No title") [\(.language)]"' | head -20
+          npm init -y
+          npm install playwright
+          npx playwright install chromium --with-deps
+
+      - name: Run fetch script
+        id: fetch
+        run: node scripts/fetch_with_playwright.js
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manga-chapters-data
+          path: data/chapters_93q1r.json
+          retention-days: 7
