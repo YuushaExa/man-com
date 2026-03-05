@@ -1,10 +1,8 @@
 // index.js - Manga Downloader for comix.to via GitHub Actions
-// Usage: Set MANGA_URL env var and run: node index.js
+// All-in-one file. Set MANGA_URL env var and run: node index.js
 
 import axios from 'axios';
-import { Wrapper } from 'axios-cookiejar-support';
-import { CookieJar } from 'tough-cookie';
-import { createWriteStream, promises as fs, mkdirSync } from 'fs';
+import { createWriteStream, promises as fs } from 'fs';
 import { join, dirname } from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
@@ -16,9 +14,9 @@ const execAsync = promisify(exec);
 const BASE_URL = 'https://comix.to/api/v2';
 const RESULT_DIR = 'result';
 const MAX_RETRIES = 3;
-const REQUEST_DELAY = 1500; // ms between requests
+const REQUEST_DELAY = 2000; // ms between requests
 
-// Browser-like headers to avoid 403
+// Full browser headers to avoid 403
 const HEADERS = {
   'Accept': 'application/json, text/plain, */*',
   'Accept-Language': 'en-US,en;q=0.9',
@@ -28,18 +26,17 @@ const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
   'Sec-Fetch-Dest': 'empty',
   'Sec-Fetch-Mode': 'cors',
-  'Sec-Fetch-Site': 'same-origin'
+  'Sec-Fetch-Site': 'same-origin',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache'
 };
 
-// Cookie jar for Cloudflare support
-const cookieJar = new CookieJar();
-const http = Wrapper(axios.create({
-  jar: cookieJar,
-  withCredentials: true,
+// Simple axios instance
+const http = axios.create({
   headers: HEADERS,
   timeout: 45000,
-  validateStatus: () => true // Handle errors manually
-}));
+  validateStatus: () => true
+});
 
 // ============ UTILS ============
 const log = {
@@ -73,12 +70,13 @@ async function fetchWithRetry(url, retries = MAX_RETRIES) {
       const res = await http.get(url);
       
       if (res.status === 403) {
-        log.warn(`403 on attempt ${attempt}. CF-Ray: ${res.headers['cf-ray'] || 'unknown'}`);
-        if (attempt === retries) throw new Error('Blocked by Cloudflare (403)');
+        log.warn(`403 on attempt ${attempt}. Headers sent: ${JSON.stringify(HEADERS).substring(0, 100)}...`);
+        if (attempt === retries) throw new Error('Blocked by server (403) - try adding proxy or wait');
         continue;
       }
       
       if (res.status !== 200) {
+        log.warn(`HTTP ${res.status} on attempt ${attempt}`);
         if (attempt === retries) throw new Error(`HTTP ${res.status}`);
         continue;
       }
@@ -87,7 +85,7 @@ async function fetchWithRetry(url, retries = MAX_RETRIES) {
     } catch (e) {
       log.warn(`Attempt ${attempt} failed: ${e.message}`);
       if (attempt === retries) throw e;
-      await sleep(1000 * attempt); // exponential backoff
+      await sleep(1000 * attempt);
     }
   }
 }
@@ -107,7 +105,7 @@ async function getMangaInfo(code) {
 }
 
 async function getAllChapters(code) {
-  const chaptersMap = new Map(); // number -> best chapter
+  const chaptersMap = new Map();
   let page = 1, hasMore = true;
   
   log.info('Fetching chapters...');
@@ -127,7 +125,6 @@ async function getAllChapters(code) {
       const votes = c.votes || 0;
       const existing = chaptersMap.get(num);
       
-      // Keep best version: official > more votes > first
       if (!existing) {
         chaptersMap.set(num, { ...c, _off: isOfficial, _votes: votes });
       } else if (
@@ -138,15 +135,12 @@ async function getAllChapters(code) {
       }
     }
     page++;
-    
-    // Safety break
     if (page > 50) {
       log.warn('Stopped at page 50 to avoid infinite loop');
       break;
     }
   }
   
-  // Convert to array, clean internal fields, sort numerically
   return Array.from(chaptersMap.values())
     .map(({ _off, _votes, ...c }) => c)
     .sort((a, b) => {
@@ -189,44 +183,32 @@ async function createArchive(sourceDir, outputPath, format = 'zip') {
     }
   }
   
-  // Fallback to zip
   const zipPath = outputPath.endsWith('.zip') ? outputPath : outputPath.replace(/\.[^.]+$/, '.zip');
   await execAsync(`cd "${sourceDir}" && zip -r -q "${zipPath}" .`);
   return zipPath;
 }
 
-// ============ MAIN DOWNLOAD LOGIC ============
+// ============ MAIN ============
 async function downloadManga({ url, start = '1', end = null, format = 'zip' }) {
   const code = extractMangaCode(url);
   log.info(`Manga code: ${code}`);
   
-  // Fetch manga info
   const manga = await getMangaInfo(code);
   const safeTitle = safeName(manga.title);
   log.info(`Downloading: ${manga.title}`);
   
-  if (manga.isNsfw) {
-    log.warn('⚠️ This manga is marked as NSFW');
-  }
+  if (manga.isNsfw) log.warn('⚠️ This manga is marked as NSFW');
   
-  // Fetch & filter chapters
   const allChapters = await getAllChapters(code);
   let chapters = allChapters.filter(c => parseFloat(c.number) >= parseFloat(start));
-  if (end) {
-    chapters = chapters.filter(c => parseFloat(c.number) <= parseFloat(end));
-  }
+  if (end) chapters = chapters.filter(c => parseFloat(c.number) <= parseFloat(end));
   
-  if (chapters.length === 0) {
-    throw new Error('No chapters found in specified range');
-  }
-  
+  if (chapters.length === 0) throw new Error('No chapters found in specified range');
   log.info(`Found ${chapters.length} chapters to download`);
   
-  // Setup directories
   const mangaDir = join(RESULT_DIR, safeTitle);
   await fs.mkdir(mangaDir, { recursive: true });
   
-  // Download each chapter
   for (const chap of chapters) {
     try {
       const chapNum = chap.number;
@@ -238,13 +220,11 @@ async function downloadManga({ url, start = '1', end = null, format = 'zip' }) {
       log.info(`Chapter ${chapNum}: fetching images...`);
       const images = await getChapterImages(chap.chapter_id);
       
-      // Download images sequentially (avoid rate limits)
       for (let i = 0; i < images.length; i++) {
         const ext = images[i].split('.').pop()?.split('?')[0] || 'jpg';
         const fname = `${String(i + 1).padStart(3, '0')}.${ext}`;
         await downloadFile(images[i], join(chapDir, fname));
       }
-      
       log.info(`✓ Chapter ${chapNum} done (${images.length} pages)`);
       
     } catch (e) {
@@ -252,21 +232,18 @@ async function downloadManga({ url, start = '1', end = null, format = 'zip' }) {
     }
   }
   
-  // Create archive
   const archiveName = `${safeTitle}.${format === 'rar' ? 'rar' : 'zip'}`;
   const archivePath = join(RESULT_DIR, archiveName);
   
   log.info(`Creating archive: ${archiveName}`);
   await createArchive(mangaDir, archivePath, format);
-  
-  // Cleanup
   await fs.rm(mangaDir, { recursive: true, force: true });
   
   log.info(`✅ Success! Archive: ${archivePath}`);
   return archivePath;
 }
 
-// ============ ENTRY POINT ============
+// ============ ENTRY ============
 async function main() {
   const {
     MANGA_URL,
