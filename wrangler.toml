@@ -1,0 +1,11 @@
+name = "comix-chapters-fetcher"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# Optional: Bind a KV namespace to store last fetched data
+# [[kv_namespaces]]
+# binding = "CHAPTERS_KV"
+# id = "your-kv-namespace-id"
+
+# Optional: Secrets (set via CLI, not in file)
+# wrangler secret put COMIX_API_KEY
