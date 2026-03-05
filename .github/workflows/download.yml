@@ -37,13 +37,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
 
       - name: 📦 Install dependencies
-        run: npm ci
+        run: npm install
 
       - name: 🔧 Install rar (if needed)
-        if: inputs.output_format == 'rar'
+        if: inputs.output_format == 'zip'
         run: |
           sudo apt-get update
           sudo apt-get install -y rar unzip
