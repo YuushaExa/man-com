@@ -19,7 +19,7 @@ const REQUEST_DELAY = 2000;
 // 🔄 PROXY CONFIGURATION - Edit this to use a proxy
 // Format: 'http://username:password@host:port' or null to disable
 // Example: 'http://user123:pass456@residential.proxy.com:8080'
-const PROXY_CONFIG = 'http://84.17.47.124:9002';
+const PROXY_CONFIG = 'http://217.116.173.221:443';
 
 // Build axios config with optional proxy
 function getAxiosConfig() {
