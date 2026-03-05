@@ -1,10 +1,34 @@
 import axios from 'axios';
 import { logger } from './utils.js';
+import { Wrapper } from 'axios-cookiejar-support';
+import { CookieJar } from 'tough-cookie';
+
+// Create a shared cookie jar
+const cookieJar = new CookieJar();
+const apiClient = Wrapper(axios.create({
+  jar: cookieJar,
+  withCredentials: true,
+  headers: HEADERS,
+  timeout: 30000
+}));
 
 const BASE_URL = 'https://comix.to/api/v2';
 const HEADERS = {
+  'Accept': 'application/json, text/plain, */*',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Connection': 'keep-alive',
   'Referer': 'https://comix.to/',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36'
+  'Origin': 'https://comix.to',
+  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Sec-Fetch-Dest': 'empty',
+  'Sec-Fetch-Mode': 'cors',
+  'Sec-Fetch-Site': 'same-origin',
+  'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
+  'Sec-Ch-Ua-Mobile': '?0',
+  'Sec-Ch-Ua-Platform': '"Windows"',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache'
 };
 
 export const ComixAPI = {
@@ -66,7 +90,7 @@ export const ComixAPI = {
   async fetchChapterPage(mangaCode, page) {
     const url = `${BASE_URL}/manga/${mangaCode}/chapters?limit=100&page=${page}&order[number]=asc`;
     try {
-      const response = await axios.get(url, { 
+     const response = await apiClient.get(url, { 
         headers: HEADERS, 
         timeout: 30000 
       });
