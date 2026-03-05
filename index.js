@@ -1,5 +1,5 @@
 // index.js - Manga Downloader for comix.to via GitHub Actions
-// All-in-one file. Set MANGA_URL env var and run: node index.js
+// ZIP only + hardcoded proxy. Edit PROXY_CONFIG below to use a proxy.
 
 import axios from 'axios';
 import { createWriteStream, promises as fs } from 'fs';
@@ -14,29 +14,56 @@ const execAsync = promisify(exec);
 const BASE_URL = 'https://comix.to/api/v2';
 const RESULT_DIR = 'result';
 const MAX_RETRIES = 3;
-const REQUEST_DELAY = 2000; // ms between requests
+const REQUEST_DELAY = 2000;
 
-// Full browser headers to avoid 403
-const HEADERS = {
-  'Accept': 'application/json, text/plain, */*',
-  'Accept-Language': 'en-US,en;q=0.9',
-  'Accept-Encoding': 'gzip, deflate, br',
-  'Referer': 'https://comix.to/',
-  'Origin': 'https://comix.to',
-  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-  'Sec-Fetch-Dest': 'empty',
-  'Sec-Fetch-Mode': 'cors',
-  'Sec-Fetch-Site': 'same-origin',
-  'Cache-Control': 'no-cache',
-  'Pragma': 'no-cache'
-};
+// 🔄 PROXY CONFIGURATION - Edit this to use a proxy
+// Format: 'http://username:password@host:port' or null to disable
+// Example: 'http://user123:pass456@residential.proxy.com:8080'
+const PROXY_CONFIG = 'http://84.17.47.124:9002';
 
-// Simple axios instance
-const http = axios.create({
-  headers: HEADERS,
-  timeout: 45000,
-  validateStatus: () => true
-});
+// Build axios config with optional proxy
+function getAxiosConfig() {
+  const config = {
+    headers: {
+      'Accept': 'application/json, text/plain, */*',
+      'Accept-Language': 'en-US,en;q=0.9',
+      'Accept-Encoding': 'gzip, deflate, br',
+      'Referer': 'https://comix.to/',
+      'Origin': 'https://comix.to',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      'Sec-Fetch-Dest': 'empty',
+      'Sec-Fetch-Mode': 'cors',
+      'Sec-Fetch-Site': 'same-origin',
+      'Cache-Control': 'no-cache',
+      'Pragma': 'no-cache'
+    },
+    timeout: 45000,
+    validateStatus: () => true
+  };
+  
+  // Add proxy if configured
+  if (PROXY_CONFIG) {
+    try {
+      const url = new URL(PROXY_CONFIG);
+      config.proxy = {
+        protocol: url.protocol.replace(':', ''),
+        host: url.hostname,
+        port: parseInt(url.port) || 80,
+        auth: url.username ? {
+          username: decodeURIComponent(url.username),
+          password: decodeURIComponent(url.password || '')
+        } : undefined
+      };
+      console.log(`[INFO] Using proxy: ${url.hostname}:${url.port}`);
+    } catch (e) {
+      console.warn(`[WARN] Invalid proxy config: ${e.message}`);
+    }
+  }
+  
+  return config;
+}
+
+const http = axios.create(getAxiosConfig());
 
 // ============ UTILS ============
 const log = {
@@ -70,8 +97,8 @@ async function fetchWithRetry(url, retries = MAX_RETRIES) {
       const res = await http.get(url);
       
       if (res.status === 403) {
-        log.warn(`403 on attempt ${attempt}. Headers sent: ${JSON.stringify(HEADERS).substring(0, 100)}...`);
-        if (attempt === retries) throw new Error('Blocked by server (403) - try adding proxy or wait');
+        log.warn(`403 on attempt ${attempt}${PROXY_CONFIG ? ' (using proxy)' : ''}`);
+        if (attempt === retries) throw new Error('Blocked by server (403)');
         continue;
       }
       
@@ -169,27 +196,21 @@ async function downloadFile(url, dest) {
   });
 }
 
-async function createArchive(sourceDir, outputPath, format = 'zip') {
+// ============ ZIP ARCHIVE ONLY ============
+async function createZip(sourceDir, outputPath) {
   await fs.mkdir(dirname(outputPath), { recursive: true });
   
-  if (format === 'rar') {
-    try {
-      await execAsync(`which rar`);
-      const rarPath = outputPath.replace(/\.zip$/, '.rar');
-      await execAsync(`rar a -r -y -inul "${rarPath}" "${sourceDir}/*"`);
-      return rarPath;
-    } catch {
-      log.warn('rar not available, using zip instead');
-    }
-  }
+  // Ensure .zip extension
+  const zipPath = outputPath.endsWith('.zip') ? outputPath : outputPath + '.zip';
   
-  const zipPath = outputPath.endsWith('.zip') ? outputPath : outputPath.replace(/\.[^.]+$/, '.zip');
+  // Use system zip command (faster & reliable on Ubuntu)
   await execAsync(`cd "${sourceDir}" && zip -r -q "${zipPath}" .`);
+  
   return zipPath;
 }
 
 // ============ MAIN ============
-async function downloadManga({ url, start = '1', end = null, format = 'zip' }) {
+async function downloadManga({ url, start = '1', end = null }) {
   const code = extractMangaCode(url);
   log.info(`Manga code: ${code}`);
   
@@ -232,15 +253,18 @@ async function downloadManga({ url, start = '1', end = null, format = 'zip' }) {
     }
   }
   
-  const archiveName = `${safeTitle}.${format === 'rar' ? 'rar' : 'zip'}`;
-  const archivePath = join(RESULT_DIR, archiveName);
+  // Create ZIP archive with manga title as filename
+  const zipName = `${safeTitle}.zip`;
+  const zipPath = join(RESULT_DIR, zipName);
   
-  log.info(`Creating archive: ${archiveName}`);
-  await createArchive(mangaDir, archivePath, format);
+  log.info(`Creating ZIP archive: ${zipName}`);
+  await createZip(mangaDir, zipPath);
+  
+  // Cleanup temp folder
   await fs.rm(mangaDir, { recursive: true, force: true });
   
-  log.info(`✅ Success! Archive: ${archivePath}`);
-  return archivePath;
+  log.info(`✅ Success! Archive: ${zipPath}`);
+  return zipPath;
 }
 
 // ============ ENTRY ============
@@ -248,8 +272,7 @@ async function main() {
   const {
     MANGA_URL,
     START_CHAPTER = '1',
-    END_CHAPTER = '',
-    OUTPUT_FORMAT = 'zip'
+    END_CHAPTER = ''
   } = process.env;
   
   if (!MANGA_URL) {
@@ -259,13 +282,13 @@ async function main() {
   
   try {
     log.info('🚀 Starting download...');
+    log.info(`Proxy: ${PROXY_CONFIG || 'disabled'}`);
     await fs.mkdir(RESULT_DIR, { recursive: true });
     
     await downloadManga({
       url: MANGA_URL,
       start: START_CHAPTER,
-      end: END_CHAPTER || null,
-      format: OUTPUT_FORMAT.toLowerCase()
+      end: END_CHAPTER || null
     });
     
     console.log('\n✅ Done! Check the "result" folder or downloaded artifact.');
