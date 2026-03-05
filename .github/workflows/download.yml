@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       manga_url:
-        description: 'comix.to URL (e.g., https://comix.to/title/mjwy-...)'
+        description: 'comix.to URL'
         required: true
         type: string
       start_chapter:
@@ -16,12 +16,6 @@ on:
         description: 'End chapter (leave empty for latest)'
         required: false
         type: string
-      output_format:
-        description: 'Archive format'
-        required: false
-        default: 'zip'
-        type: choice
-        options: [zip, rar]
 
 jobs:
   download:
@@ -36,16 +30,11 @@ jobs:
       
       - run: npm install
       
-      - name: Install rar (optional)
-        if: inputs.output_format == 'rar'
-        run: sudo apt-get update && sudo apt-get install -y rar
-        
       - name: Download manga
         env:
           MANGA_URL: ${{ inputs.manga_url }}
           START_CHAPTER: ${{ inputs.start_chapter }}
           END_CHAPTER: ${{ inputs.end_chapter }}
-          OUTPUT_FORMAT: ${{ inputs.output_format }}
           DEBUG: ${{ runner.debug == '1' && 'true' || '' }}
         run: node index.js
         
@@ -53,4 +42,4 @@ jobs:
         with:
           name: manga-download
           path: result/
-          retention-days: 9
+          retention-days: 1
