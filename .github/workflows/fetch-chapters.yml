@@ -1,50 +1,132 @@
-name: Fetch Manga Chapters (Playwright)
+name: Fetch Manga Chapters (via VLESS)
 
 on:
   workflow_dispatch:
-  
+
+env:
+  API_URL: "https://comix.to/api/v2/manga/93q1r/chapters?limit=100&page=1"
+  PROXY_PORT: 10808
+
 jobs:
   fetch-chapters:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install dependencies
+      - name: Install dependencies (curl, jq, xray)
         run: |
-          npm init -y
-          # Ensure ES modules
-          npm pkg set type="module"
-          npm install playwright
-          npx playwright install chromium --with-deps
+          sudo apt-get update
+          sudo apt-get install -y curl jq wget unzip
+          
+          # Install Xray-core (VLESS client)
+          XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name | sed 's/v//')
+          wget -q https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip
+          unzip -q Xray-linux-64.zip -d /tmp/xray
+          sudo mv /tmp/xray/xray /usr/local/bin/xray
+          sudo chmod +x /usr/local/bin/xray
 
-      - name: Run fetch script
-        id: fetch
-        run: node scripts/fetch_with_playwright.js
+      - name: Generate Xray config from VLESS
         env:
-          # Optional: increase timeout for slow networks
-          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 0
+          VLESS_URL: ${{ secrets.VLESS_CONFIG }}
+        run: |
+          # Parse VLESS URL components
+          UUID=$(echo "$VLESS_URL" | sed -n 's|vless://\([^@]*\)@.*|\1|p')
+          SERVER=$(echo "$VLESS_URL" | sed -n 's|vless://[^@]*@\([^:]*\):.*|\1|p')
+          PORT=$(echo "$VLESS_URL" | sed -n 's|.*@\([^?]*\):\([0-9]*\).*|\2|p')
+          PATH_VAL=$(echo "$VLESS_URL" | grep -oP 'path=\K[^&]*')
+          HOST=$(echo "$VLESS_URL" | grep -oP 'host=\K[^&]*')
+          TYPE=$(echo "$VLESS_URL" | grep -oP 'type=\K[^&]*')
+          
+          # Create config.json for Xray
+          cat > config.json << EOF
+          {
+            "inbounds": [{
+              "port": $PROXY_PORT,
+              "listen": "127.0.0.1",
+              "protocol": "socks",
+              "settings": { "auth": "noauth", "udp": false }
+            }],
+            "outbounds": [{
+              "protocol": "vless",
+              "settings": {
+                "vnext": [{
+                  "address": "$SERVER",
+                  "port": $PORT,
+                  "users": [{ "id": "$UUID", "encryption": "none" }]
+                }]
+              },
+              "streamSettings": {
+                "network": "$TYPE",
+                "httpUpgradeSettings": {
+                  "path": "/$PATH_VAL",
+                  "host": "$HOST"
+                },
+                "security": "none"
+              }
+            }]
+          }
+          EOF
+          echo "✅ Xray config generated"
 
-      - name: Upload data artifact
-        if: success()
+      - name: Start Xray proxy in background
+        run: |
+          nohup xray run -config config.json > xray.log 2>&1 &
+          sleep 3
+          # Verify proxy is listening
+          if ! ss -tlnp | grep -q $PROXY_PORT; then
+            echo "❌ Xray failed to start. Log:"
+            cat xray.log
+            exit 1
+          fi
+          echo "✅ Proxy running on port $PROXY_PORT"
+
+      - name: Fetch API via proxy
+        id: api_call
+        run: |
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            --socks5-hostname 127.0.0.1:$PROXY_PORT \
+            --connect-timeout 15 \
+            --max-time 30 \
+            "$API_URL")
+          
+          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+          
+          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
+          echo "response<<EOF" >> $GITHUB_ENV
+          echo "$BODY" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
+          
+          if [ "$HTTP_CODE" -ne 200 ]; then
+            echo "❌ API request failed: HTTP $HTTP_CODE"
+            echo "$BODY"
+            exit 1
+          fi
+          echo "✅ API response received"
+
+      - name: Parse and display chapters
+        run: |
+          COUNT=$(echo "$response" | jq -r '.result.items | length')
+          echo "✅ Fetched $COUNT chapters"
+          
+          echo "### 📚 Chapter Summary" >> $GITHUB_STEP_SUMMARY
+          echo "$response" | jq -r '.result.items[] | "- **Ch. \(.number)**: \(.name // "No title") `[\(.language)]`"' >> $GITHUB_STEP_SUMMARY
+
+      - name: Save response artifact
+        run: |
+          mkdir -p data
+          echo "$response" | jq '.' > data/chapters_93q1r.json
+          
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: manga-chapters-data
+          name: manga-chapters-vless
           path: data/chapters_93q1r.json
           retention-days: 7
 
-      - name: Upload debug artifacts (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: debug-artifacts
-          path: |
-            error-screenshot.png
-            data/
-          retention-days: 3
+      - name: Cleanup (optional)
+        if: always()
+        run: |
+          pkill -f xray || true
+          rm -f config.json xray.log
