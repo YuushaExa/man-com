@@ -1,64 +1,56 @@
-name: 📚 Download Manga
+name: 📚 Manga Downloader
 
 on:
   workflow_dispatch:
     inputs:
       manga_url:
-        description: 'Comix.to manga URL (e.g., https://comix.to/title/93q1r-the-summoner)'
+        description: 'comix.to URL (e.g., https://comix.to/title/mjwy-...)'
         required: true
         type: string
       start_chapter:
-        description: 'Start chapter number (optional, e.g., 1 or 2.5)'
+        description: 'Start chapter (e.g., 1 or 2.5)'
         required: false
-        type: string
         default: '1'
+        type: string
       end_chapter:
-        description: 'End chapter number (optional, leave empty for latest)'
+        description: 'End chapter (leave empty for latest)'
         required: false
         type: string
       output_format:
-        description: 'Output format: zip or rar'
+        description: 'Archive format'
         required: false
+        default: 'zip'
         type: choice
-        default: 'rar'
-        options:
-          - zip
-          - rar
+        options: [zip, rar]
 
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 360  # 6 hours max
+    timeout-minutes: 180
     steps:
-      - name: 📥 Checkout code
-        uses: actions/checkout@v4
-
-      - name: 🟢 Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      
+      - uses: actions/setup-node@v4
         with:
           node-version: '18'
-
-      - name: 📦 Install dependencies
-        run: npm install
-
-      - name: 🔧 Install rar (if needed)
-        if: inputs.output_format == 'zip'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y rar unzip
-
-      - name: 🚀 Run downloader
+      
+      - run: npm install
+      
+      - name: Install rar (optional)
+        if: inputs.output_format == 'rar'
+        run: sudo apt-get update && sudo apt-get install -y rar
+        
+      - name: Download manga
         env:
           MANGA_URL: ${{ inputs.manga_url }}
           START_CHAPTER: ${{ inputs.start_chapter }}
           END_CHAPTER: ${{ inputs.end_chapter }}
           OUTPUT_FORMAT: ${{ inputs.output_format }}
-        run: node src/index.js
-
-      - name: 📤 Upload result artifact
-        uses: actions/upload-artifact@v4
+          DEBUG: ${{ runner.debug == '1' && 'true' || '' }}
+        run: node index.js
+        
+      - uses: actions/upload-artifact@v4
         with:
-          name: manga-result
+          name: manga-download
           path: result/
           retention-days: 9
-          if-no-files-found: error
