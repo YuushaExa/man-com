@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { logger } from './utils.js';
-import { Wrapper } from 'axios-cookiejar-support';
+import from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
 
 // Create a shared cookie jar
