@@ -2,10 +2,11 @@ name: Fetch Manga Chapters (Playwright)
 
 on:
   workflow_dispatch:
-
+  
 jobs:
   fetch-chapters:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -15,19 +16,35 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Playwright + dependencies
+      - name: Install dependencies
         run: |
           npm init -y
+          # Ensure ES modules
+          npm pkg set type="module"
           npm install playwright
           npx playwright install chromium --with-deps
 
       - name: Run fetch script
         id: fetch
         run: node scripts/fetch_with_playwright.js
+        env:
+          # Optional: increase timeout for slow networks
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 0
 
-      - name: Upload artifact
+      - name: Upload data artifact
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: manga-chapters-data
           path: data/chapters_93q1r.json
           retention-days: 7
+
+      - name: Upload debug artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: debug-artifacts
+          path: |
+            error-screenshot.png
+            data/
+          retention-days: 3
