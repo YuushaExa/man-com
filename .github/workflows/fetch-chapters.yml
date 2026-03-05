@@ -18,7 +18,7 @@ jobs:
       - name: Create download directory
         run: mkdir -p downloaded-assets
 
-      - name: Download image
+      - name: Download image with headers
         id: download
         run: |
           IMAGE_URL="https://j24n.wowpic2.store/ii/bEqPbYfoMT0GmkHlSmKfvDpQ5oEZU/03.webp"
@@ -26,14 +26,19 @@ jobs:
           
           echo "Attempting to download: $IMAGE_URL"
           
-          # Try download with curl (with retries and timeout)
-          if curl -L --retry 3 --retry-delay 5 --connect-timeout 10 -o "$OUTPUT_PATH" "$IMAGE_URL"; then
+          # Download with browser-like headers to avoid blocking
+          if curl -L --retry 3 --retry-delay 5 --connect-timeout 10 \
+            -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" \
+            -H "Accept: image/webp,image/apng,image/*,*/*;q=0.8" \
+            -H "Accept-Language: en-US,en;q=0.9" \
+            -H "Referer: https://j24n.wowpic2.store/" \
+            -o "$OUTPUT_PATH" "$IMAGE_URL"; then
             echo "✓ Download succeeded"
             echo "success=true" >> $GITHUB_OUTPUT
           else
-            echo "✗ Download failed"
+            echo "✗ Download failed with exit code: $?"
             echo "success=false" >> $GITHUB_OUTPUT
-            exit 1  # Fail the job if download fails
+            exit 1
           fi
 
       - name: Verify downloaded file
