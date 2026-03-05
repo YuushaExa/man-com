@@ -1,165 +1,58 @@
-name: Fetch Manga Chapters (via VLESS)
+# .github/workflows/download-image.yml
+name: Download Image
 
 on:
-  workflow_dispatch:
-
-env:
-  API_URL: "https://comix.to/api/v2/manga/93q1r/chapters?limit=100&page=1"
-  PROXY_PORT: 10808
-  XRAY_VERSION: "1.8.24"  # Minimum version with httpupgrade support
+  workflow_dispatch:  # Allow manual trigger
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
 
 jobs:
-  fetch-chapters:
+  download-image:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y curl jq wget unzip
+      - name: Create download directory
+        run: mkdir -p downloaded-assets
 
-      - name: Install Xray-core (v1.8.0+ for httpupgrade)
+      - name: Download image
+        id: download
         run: |
-          wget -q https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip
-          unzip -q Xray-linux-64.zip -d /tmp/xray
-          sudo mv /tmp/xray/xray /usr/local/bin/xray
-          sudo chmod +x /usr/local/bin/xray
-          xray version  # Verify installation
+          IMAGE_URL="https://j24n.wowpic2.store/ii/bEqPbYfoMT0GmkHlSmKfvDpQ5oEZU/03.webp"
+          OUTPUT_PATH="downloaded-assets/03.webp"
+          
+          echo "Attempting to download: $IMAGE_URL"
+          
+          # Try download with curl (with retries and timeout)
+          if curl -L --retry 3 --retry-delay 5 --connect-timeout 10 -o "$OUTPUT_PATH" "$IMAGE_URL"; then
+            echo "✓ Download succeeded"
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "✗ Download failed"
+            echo "success=false" >> $GITHUB_OUTPUT
+            exit 1  # Fail the job if download fails
+          fi
 
-      - name: Generate Xray config from VLESS secret
-        env:
-          VLESS_URL: ${{ secrets.VLESS_CONFIG }}
+      - name: Verify downloaded file
+        if: steps.download.outputs.success == 'true'
         run: |
-          # Parse VLESS URL properly
-          UUID=$(echo "$VLESS_URL" | grep -oP 'vless://\K[^@]+')
-          SERVER=$(echo "$VLESS_URL" | grep -oP '@\K[^:]+' | head -1)
-          PORT=$(echo "$VLESS_URL" | grep -oP '@[^:]+:\K[0-9]+')
-          
-          # Extract query parameters
-          QUERY=$(echo "$VLESS_URL" | grep -oP '\?.*#' | tr -d '?#')
-          PATH_VAL=$(echo "$QUERY" | grep -oP 'path=\K[^&]+' || echo "/")
-          # Remove early data param from path if present
-          PATH_VAL=$(echo "$PATH_VAL" | sed 's/?ed=[0-9]*$//' | sed 's/&ed=[0-9]*$//')
-          HOST=$(echo "$QUERY" | grep -oP 'host=\K[^&]+')
-          ED=$(echo "$QUERY" | grep -oP 'ed=\K[0-9]+' || echo "2056")
-          
-          echo "🔍 Parsed: server=$SERVER:$PORT, path=$PATH_VAL, host=$HOST, ed=$ED"
-          
-          # Generate proper Xray config for httpupgrade
-          cat > config.json << EOF
-          {
-            "inbounds": [{
-              "port": $PROXY_PORT,
-              "listen": "127.0.0.1",
-              "protocol": "socks",
-              "settings": { "auth": "noauth", "udp": false }
-            }],
-            "outbounds": [{
-              "tag": "proxy",
-              "protocol": "vless",
-              "settings": {
-                "vnext": [{
-                  "address": "$SERVER",
-                  "port": $PORT,
-                  "users": [{ "id": "$UUID", "encryption": "none", "level": 8 }]
-                }]
-              },
-              "streamSettings": {
-                "network": "httpupgrade",
-                "security": "none",
-                "httpupgradeSettings": {
-                  "path": "$PATH_VAL",
-                  "host": "$HOST",
-                  "ed": $ED
-                }
-              },
-              "mux": { "enabled": false }
-            }],
-            "routing": {
-              "rules": [{
-                "type": "field",
-                "ip": ["geoip:private"],
-                "outboundTag": "direct"
-              }],
-              "domainStrategy": "AsIs"
-            }
-          }
-          EOF
-          echo "✅ Config generated:"
-          jq '.outbounds[0].streamSettings' config.json
-
-      - name: Start Xray proxy
-        run: |
-          echo "🚀 Starting Xray..."
-          nohup xray run -config config.json > xray.log 2>&1 &
-          XRAY_PID=$!
-          echo $XRAY_PID > xray.pid
-          
-          # Wait for proxy to be ready
-          for i in {1..15}; do
-            if ss -tlnp | grep -q ":$PROXY_PORT "; then
-              echo "✅ Proxy listening on port $PROXY_PORT"
-              break
-            fi
-            echo "⏳ Waiting for proxy... ($i/15)"
-            sleep 1
-          done
-          
-          # Final check
-          if ! ss -tlnp | grep -q ":$PROXY_PORT "; then
-            echo "❌ Proxy failed to start. Log:"
-            cat xray.log
+          FILE="downloaded-assets/03.webp"
+          if [ -f "$FILE" ] && [ -s "$FILE" ]; then
+            echo "✓ File exists and is not empty"
+            echo "File size: $(du -h "$FILE" | cut -f1)"
+            echo "File type: $(file -b "$FILE")"
+          else
+            echo "✗ File verification failed"
             exit 1
           fi
 
-      - name: Fetch API via SOCKS5 proxy
-        id: api_call
-        run: |
-          echo "🌐 Fetching: $API_URL"
-          RESPONSE=$(curl -s -w "\n%{http_code}" \
-            --socks5-hostname 127.0.0.1:$PROXY_PORT \
-            --connect-timeout 20 \
-            --max-time 45 \
-            -H "User-Agent: Mozilla/5.0" \
-            "$API_URL")
-          
-          HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
-          BODY=$(echo "$RESPONSE" | sed '$d')
-          
-          echo "http_code=$HTTP_CODE" >> $GITHUB_OUTPUT
-          echo "response<<EOF" >> $GITHUB_ENV
-          echo "$BODY" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
-          
-          if [ "$HTTP_CODE" != "200" ]; then
-            echo "❌ Request failed: HTTP $HTTP_CODE"
-            echo "Response body: $BODY"
-            exit 1
-          fi
-          echo "✅ Success: $(echo "$BODY" | jq -r '.result.items | length') chapters"
-
-      - name: Display summary
-        run: |
-          echo "### 📚 Chapters Found: $(echo "$response" | jq -r '.result.items | length')" >> $GITHUB_STEP_SUMMARY
-          echo "$response" | jq -r '.result.items[:10][] | "- Ch. \(.number): \(.name // "Untitled") `[\(.language)]`"' >> $GITHUB_STEP_SUMMARY
-
-      - name: Save & upload artifact
-        run: |
-          mkdir -p data
-          echo "$response" | jq '.' > data/chapters_93q1r.json
-        continue-on-error: true
-        
-      - name: Upload artifact
+      - name: Upload artifact (optional)
+        if: steps.download.outputs.success == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: manga-chapters-data
-          path: data/chapters_93q1r.json
-          retention-days: 3
-
-      - name: Cleanup
-        if: always()
-        run: |
-          [ -f xray.pid ] && kill $(cat xray.pid) 2>/dev/null || true
-          rm -f config.json xray.log xray.pid Xray-linux-64.zip
+          name: downloaded-image
+          path: downloaded-assets/03.webp
+          retention-days: 7
