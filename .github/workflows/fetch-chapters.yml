@@ -6,6 +6,7 @@ on:
 env:
   API_URL: "https://comix.to/api/v2/manga/93q1r/chapters?limit=100&page=1"
   PROXY_PORT: 10808
+  XRAY_VERSION: "1.8.24"  # Minimum version with httpupgrade support
 
 jobs:
   fetch-chapters:
@@ -14,31 +15,39 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install dependencies (curl, jq, xray)
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y curl jq wget unzip
-          
-          # Install Xray-core (VLESS client)
-          XRAY_VERSION=$(curl -s https://api.github.com/repos/XTLS/Xray-core/releases/latest | jq -r .tag_name | sed 's/v//')
+
+      - name: Install Xray-core (v1.8.0+ for httpupgrade)
+        run: |
           wget -q https://github.com/XTLS/Xray-core/releases/download/v${XRAY_VERSION}/Xray-linux-64.zip
           unzip -q Xray-linux-64.zip -d /tmp/xray
           sudo mv /tmp/xray/xray /usr/local/bin/xray
           sudo chmod +x /usr/local/bin/xray
+          xray version  # Verify installation
 
-      - name: Generate Xray config from VLESS
+      - name: Generate Xray config from VLESS secret
         env:
           VLESS_URL: ${{ secrets.VLESS_CONFIG }}
         run: |
-          # Parse VLESS URL components
-          UUID=$(echo "$VLESS_URL" | sed -n 's|vless://\([^@]*\)@.*|\1|p')
-          SERVER=$(echo "$VLESS_URL" | sed -n 's|vless://[^@]*@\([^:]*\):.*|\1|p')
-          PORT=$(echo "$VLESS_URL" | sed -n 's|.*@\([^?]*\):\([0-9]*\).*|\2|p')
-          PATH_VAL=$(echo "$VLESS_URL" | grep -oP 'path=\K[^&]*')
-          HOST=$(echo "$VLESS_URL" | grep -oP 'host=\K[^&]*')
-          TYPE=$(echo "$VLESS_URL" | grep -oP 'type=\K[^&]*')
+          # Parse VLESS URL properly
+          UUID=$(echo "$VLESS_URL" | grep -oP 'vless://\K[^@]+')
+          SERVER=$(echo "$VLESS_URL" | grep -oP '@\K[^:]+' | head -1)
+          PORT=$(echo "$VLESS_URL" | grep -oP '@[^:]+:\K[0-9]+')
           
-          # Create config.json for Xray
+          # Extract query parameters
+          QUERY=$(echo "$VLESS_URL" | grep -oP '\?.*#' | tr -d '?#')
+          PATH_VAL=$(echo "$QUERY" | grep -oP 'path=\K[^&]+' || echo "/")
+          # Remove early data param from path if present
+          PATH_VAL=$(echo "$PATH_VAL" | sed 's/?ed=[0-9]*$//' | sed 's/&ed=[0-9]*$//')
+          HOST=$(echo "$QUERY" | grep -oP 'host=\K[^&]+')
+          ED=$(echo "$QUERY" | grep -oP 'ed=\K[0-9]+' || echo "2056")
+          
+          echo "🔍 Parsed: server=$SERVER:$PORT, path=$PATH_VAL, host=$HOST, ed=$ED"
+          
+          # Generate proper Xray config for httpupgrade
           cat > config.json << EOF
           {
             "inbounds": [{
@@ -48,46 +57,72 @@ jobs:
               "settings": { "auth": "noauth", "udp": false }
             }],
             "outbounds": [{
+              "tag": "proxy",
               "protocol": "vless",
               "settings": {
                 "vnext": [{
                   "address": "$SERVER",
                   "port": $PORT,
-                  "users": [{ "id": "$UUID", "encryption": "none" }]
+                  "users": [{ "id": "$UUID", "encryption": "none", "level": 8 }]
                 }]
               },
               "streamSettings": {
-                "network": "$TYPE",
-                "httpUpgradeSettings": {
-                  "path": "/$PATH_VAL",
-                  "host": "$HOST"
-                },
-                "security": "none"
-              }
-            }]
+                "network": "httpupgrade",
+                "security": "none",
+                "httpupgradeSettings": {
+                  "path": "$PATH_VAL",
+                  "host": "$HOST",
+                  "ed": $ED
+                }
+              },
+              "mux": { "enabled": false }
+            }],
+            "routing": {
+              "rules": [{
+                "type": "field",
+                "ip": ["geoip:private"],
+                "outboundTag": "direct"
+              }],
+              "domainStrategy": "AsIs"
+            }
           }
           EOF
-          echo "✅ Xray config generated"
+          echo "✅ Config generated:"
+          jq '.outbounds[0].streamSettings' config.json
 
-      - name: Start Xray proxy in background
+      - name: Start Xray proxy
         run: |
+          echo "🚀 Starting Xray..."
           nohup xray run -config config.json > xray.log 2>&1 &
-          sleep 3
-          # Verify proxy is listening
-          if ! ss -tlnp | grep -q $PROXY_PORT; then
-            echo "❌ Xray failed to start. Log:"
+          XRAY_PID=$!
+          echo $XRAY_PID > xray.pid
+          
+          # Wait for proxy to be ready
+          for i in {1..15}; do
+            if ss -tlnp | grep -q ":$PROXY_PORT "; then
+              echo "✅ Proxy listening on port $PROXY_PORT"
+              break
+            fi
+            echo "⏳ Waiting for proxy... ($i/15)"
+            sleep 1
+          done
+          
+          # Final check
+          if ! ss -tlnp | grep -q ":$PROXY_PORT "; then
+            echo "❌ Proxy failed to start. Log:"
             cat xray.log
             exit 1
           fi
-          echo "✅ Proxy running on port $PROXY_PORT"
 
-      - name: Fetch API via proxy
+      - name: Fetch API via SOCKS5 proxy
         id: api_call
         run: |
+          echo "🌐 Fetching: $API_URL"
           RESPONSE=$(curl -s -w "\n%{http_code}" \
             --socks5-hostname 127.0.0.1:$PROXY_PORT \
-            --connect-timeout 15 \
-            --max-time 30 \
+            --connect-timeout 20 \
+            --max-time 45 \
+            -H "User-Agent: Mozilla/5.0" \
             "$API_URL")
           
           HTTP_CODE=$(echo "$RESPONSE" | tail -n1)
@@ -98,35 +133,33 @@ jobs:
           echo "$BODY" >> $GITHUB_ENV
           echo "EOF" >> $GITHUB_ENV
           
-          if [ "$HTTP_CODE" -ne 200 ]; then
-            echo "❌ API request failed: HTTP $HTTP_CODE"
-            echo "$BODY"
+          if [ "$HTTP_CODE" != "200" ]; then
+            echo "❌ Request failed: HTTP $HTTP_CODE"
+            echo "Response body: $BODY"
             exit 1
           fi
-          echo "✅ API response received"
+          echo "✅ Success: $(echo "$BODY" | jq -r '.result.items | length') chapters"
 
-      - name: Parse and display chapters
+      - name: Display summary
         run: |
-          COUNT=$(echo "$response" | jq -r '.result.items | length')
-          echo "✅ Fetched $COUNT chapters"
-          
-          echo "### 📚 Chapter Summary" >> $GITHUB_STEP_SUMMARY
-          echo "$response" | jq -r '.result.items[] | "- **Ch. \(.number)**: \(.name // "No title") `[\(.language)]`"' >> $GITHUB_STEP_SUMMARY
+          echo "### 📚 Chapters Found: $(echo "$response" | jq -r '.result.items | length')" >> $GITHUB_STEP_SUMMARY
+          echo "$response" | jq -r '.result.items[:10][] | "- Ch. \(.number): \(.name // "Untitled") `[\(.language)]`"' >> $GITHUB_STEP_SUMMARY
 
-      - name: Save response artifact
+      - name: Save & upload artifact
         run: |
           mkdir -p data
           echo "$response" | jq '.' > data/chapters_93q1r.json
-          
+        continue-on-error: true
+        
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: manga-chapters-vless
+          name: manga-chapters-data
           path: data/chapters_93q1r.json
-          retention-days: 7
+          retention-days: 3
 
-      - name: Cleanup (optional)
+      - name: Cleanup
         if: always()
         run: |
-          pkill -f xray || true
-          rm -f config.json xray.log
+          [ -f xray.pid ] && kill $(cat xray.pid) 2>/dev/null || true
+          rm -f config.json xray.log xray.pid Xray-linux-64.zip
