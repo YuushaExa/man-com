@@ -12,7 +12,8 @@ scraper = cloudscraper.create_scraper(
         "browser":"chrome",
         "platform":"windows",
         "mobile":False
-    }
+    },
+    headers=HEADERS
 )
 
 HEADERS = {
