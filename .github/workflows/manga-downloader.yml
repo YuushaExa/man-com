@@ -1,5 +1,5 @@
 # .github/workflows/manga-downloader.yml
-name: Manga Downloader 2
+name: Manga Downloader
 
 on:
   workflow_dispatch:
@@ -30,8 +30,8 @@ jobs:
           
           JSON_FILE="${1:-data.json}"
           
-          # Read manga info
-          MANGA_TITLE=$(jq -r '.manga.title' "$JSON_FILE" | sed 's/[^a-zA-Z0-9._-]/_/g')
+          # Read manga info - FIXED: hyphen escaped in sed pattern
+          MANGA_TITLE=$(jq -r '.manga.title' "$JSON_FILE" | sed 's/[^a-zA-Z0-9._\-]/_/g')
           echo "📚 Downloading: $MANGA_TITLE"
           
           # Create base directory
@@ -43,10 +43,7 @@ jobs:
           echo "📦 Total chapters: $TOTAL_CHAPTERS"
           
           # Process each chapter
-          CHAPTER_INDEX=0
           jq -c '.chapters[]' "$JSON_FILE" | while read -r chapter; do
-            CHAPTER_INDEX=$((CHAPTER_INDEX + 1))
-            
             # Extract chapter info
             CHAPTER_NUM=$(echo "$chapter" | jq -r '.number')
             PAGES_COUNT=$(echo "$chapter" | jq -r '.pages_count')
@@ -55,16 +52,15 @@ jobs:
             # Format chapter folder name (zero-padded for sorting)
             CHAPTER_PADDED=$(printf "%03d" "$CHAPTER_NUM")
             if [ -n "$CHAPTER_NAME" ]; then
-              CHAPTER_DIR="${BASE_DIR}/Chapter_${CHAPTER_PADDED}_${CHAPTER_NAME}"
+              # FIXED: hyphen escaped in sed pattern
+              CHAPTER_DIR="${BASE_DIR}/Chapter_${CHAPTER_PADDED}_$(echo "$CHAPTER_NAME" | sed 's/[^a-zA-Z0-9._\-]/_/g')"
             else
               CHAPTER_DIR="${BASE_DIR}/Chapter_${CHAPTER_PADDED}"
             fi
             
-            # Clean folder name
-            CHAPTER_DIR=$(echo "$CHAPTER_DIR" | sed 's/[^a-zA-Z0-9._-\/]/_/g')
             mkdir -p "$CHAPTER_DIR"
             
-            echo "⬇️  Chapter $CHAPTER_NUM/$TOTAL_CHAPTERS: $CHAPTER_DIR ($PAGES_COUNT pages)"
+            echo "⬇️  Chapter $CHAPTER_NUM: $CHAPTER_DIR ($PAGES_COUNT pages)"
             
             # Download each page
             PAGE_INDEX=0
@@ -85,9 +81,9 @@ jobs:
                 "$IMAGE_URL" \
                 -o "$OUTPUT_FILE" \
                 --retry 3 \
-                --retry-delay 2
+                --retry-delay 2 \
+                --connect-timeout 30
               
-              # Progress dot
               echo -n "."
             done
             echo " ✅ Done"
@@ -109,14 +105,15 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.MANGA_OUTPUT }}
+          name: manga-download
           path: ${{ env.MANGA_OUTPUT }}
           retention-days: 9
           compression-level: 9
 
       - name: Summary
         run: |
-          echo "## ✅ Download Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- 📦 Archive: \`${{ env.MANGA_OUTPUT }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "- 📁 Size: $(du -h "${{ env.MANGA_OUTPUT }}" | cut -f1)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📄 Files: $(unzip -l "${{ env.MANGA_OUTPUT }}" | tail -1 | awk '{print $1}')" >> $GITHUB_STEP_SUMMARY
+          if [ -f "${{ env.MANGA_OUTPUT }}" ]; then
+            echo "## ✅ Download Complete" >> $GITHUB_STEP_SUMMARY
+            echo "- 📦 Archive: \`${{ env.MANGA_OUTPUT }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- 📁 Size: $(du -h "${{ env.MANGA_OUTPUT }}" | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          fi
