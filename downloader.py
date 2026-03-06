@@ -5,7 +5,7 @@ import os
 import zipfile
 import re
 
-API="https://comix.to/api/v2"
+API="https://comix.to/api/v2  "
 
 scraper = cloudscraper.create_scraper(
     browser={
@@ -14,6 +14,11 @@ scraper = cloudscraper.create_scraper(
         "mobile":False
     }
 )
+
+HEADERS = {
+    "Referer": "https://comix.to/  ",
+    "User-Agent": "Mozilla/5.0"
+}
 
 def extract_code(url):
     slug=url.rstrip("/").split("/")[-1]
@@ -29,7 +34,7 @@ def get_json(url):
 
 def download(url,path):
 
-    r=scraper.get(url,stream=True)
+    r=scraper.get(url,stream=True, headers=HEADERS)
     r.raise_for_status()
 
     with open(path,"wb") as f:
