@@ -1,45 +1,30 @@
-name: 📚 Manga Downloader
+name: Comix Manga Downloader
 
 on:
   workflow_dispatch:
     inputs:
       manga_url:
-        description: 'comix.to URL'
+        description: "Comix manga URL"
         required: true
-        type: string
-      start_chapter:
-        description: 'Start chapter (e.g., 1 or 2.5)'
-        required: false
-        default: '1'
-        type: string
-      end_chapter:
-        description: 'End chapter (leave empty for latest)'
-        required: false
         type: string
 
 jobs:
   download:
     runs-on: ubuntu-latest
-    timeout-minutes: 180
+
     steps:
       - uses: actions/checkout@v4
-      
-      - uses: actions/setup-node@v4
+
+      - name: Install Python deps
+        run: |
+          pip install requests
+
+      - name: Run downloader
+        run: |
+          python downloader.py "${{ github.event.inputs.manga_url }}"
+
+      - name: Upload ZIP
+        uses: actions/upload-artifact@v4
         with:
-          node-version: '18'
-      
-      - run: npm install
-      
-      - name: Download manga
-        env:
-          MANGA_URL: ${{ inputs.manga_url }}
-          START_CHAPTER: ${{ inputs.start_chapter }}
-          END_CHAPTER: ${{ inputs.end_chapter }}
-          DEBUG: ${{ runner.debug == '1' && 'true' || '' }}
-        run: node index.js
-        
-      - uses: actions/upload-artifact@v4
-        with:
-          name: manga-download
-          path: result/
-          retention-days: 1
+          name: manga
+          path: output/*.zip
