@@ -9,14 +9,15 @@ API="https://comix.to/api/v2  "
 
 scraper = cloudscraper.create_scraper(
     browser={
-        "browser":"chrome",
-        "platform":"windows",
-        "mobile":False
-    },
-    headers={
-        "Referer": "https://comix.to/"
+        "browser": "chrome",
+        "platform": "windows",
+        "mobile": False
     }
 )
+
+scraper.headers.update({
+    "Referer": "https://comix.to/"
+})
 
 def extract_code(url):
     slug=url.rstrip("/").split("/")[-1]
