@@ -1,4 +1,4 @@
-name: Manga Downloader2
+name: Manga Downloader
 
 on:
   workflow_dispatch:
@@ -7,6 +7,11 @@ on:
         description: 'Path to data.json file'
         required: false
         default: 'data.json'
+      optimize_images:
+        description: 'Optimize images with Squoosh (WebP, quality: 75, effort: 4)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   download-manga:
@@ -22,13 +27,20 @@ jobs:
           sudo apt-get install -y curl zip
           # Node.js 18+ is pre-installed on ubuntu-latest
 
-      - name: Run manga downloader (basic.cjs)
-        run: node basic.cjs "${{ github.event.inputs.json_file }}"
+      - name: Install Squoosh CLI (if optimization enabled)
+        if: inputs.optimize_images == true
+        run: npm install -g @squoosh/cli@0.4.0  # Pin version for stability [[51]]
+
+      - name: Run manga downloader (basic.js)
+        run: |
+          node basic.js \
+            "${{ github.event.inputs.json_file }}" \
+            "${{ inputs.optimize_images }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: manga-download
+          name: manga-download${{ inputs.optimize_images == true && '-optimized' || '' }}
           path: ${{ env.MANGA_OUTPUT }}
           retention-days: 9
           compression-level: 9
@@ -39,5 +51,8 @@ jobs:
             echo "## ✅ Download Complete" >> $GITHUB_STEP_SUMMARY
             echo "- 📦 Archive: \`${{ env.MANGA_OUTPUT }}\`" >> $GITHUB_STEP_SUMMARY
             echo "- 📁 Size: $(du -h "${{ env.MANGA_OUTPUT }}" | cut -f1)" >> $GITHUB_STEP_SUMMARY
-            echo "- 📖 Chapters: $(echo "${{ env.MANGA_OUTPUT }}" | grep -oP 'ch\K[^.]+')" >> $GITHUB_STEP_SUMMARY
+            echo "- 📖 Chapters: $(echo "${{ env.MANGA_OUTPUT }}" | grep -oP 'ch\K[^_.]+')" >> $GITHUB_STEP_SUMMARY
+            if [ "${{ inputs.optimize_images }}" = "true" ]; then
+              echo "- 🎨 Optimization: Squoosh WebP (quality: 75, effort: 4)" >> $GITHUB_STEP_SUMMARY
+            fi
           fi
