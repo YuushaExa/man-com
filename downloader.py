@@ -1,132 +1,107 @@
-import cloudscraper
-import requests
-import sys
 import os
+import requests
+import cloudscraper
 import zipfile
-import re
+import time
 
-API="https://comix.to/api/v2"
+API = "https://comix.to/api/v2"
 
-scraper = cloudscraper.create_scraper(
-    browser={
-        "browser":"chrome",
-        "platform":"windows",
-        "mobile":False
-    }
-)
+HEADERS = {
+    "Referer": "https://comix.to/",
+    "Origin": "https://comix.to",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36",
+    "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+}
 
-def extract_code(url):
-    slug=url.rstrip("/").split("/")[-1]
-    return slug.split("-")[0]
+scraper = cloudscraper.create_scraper()
 
-def safe(s):
-    return re.sub(r"[^a-zA-Z0-9]+","_",s)[:100]
 
-def get_json(url):
-    r=scraper.get(url)
+def fetch_json(url):
+    r = scraper.get(url, headers=HEADERS)
     r.raise_for_status()
     return r.json()
 
-def download(url,path):
 
-    r=scraper.get(url,stream=True)
-    r.raise_for_status()
+def download_image(url, path, retries=3):
+    for i in range(retries):
+        try:
+            r = scraper.get(url, headers=HEADERS, stream=True, timeout=30)
 
-    with open(path,"wb") as f:
-        for chunk in r.iter_content(8192):
-            f.write(chunk)
+            if r.status_code == 200:
+                with open(path, "wb") as f:
+                    for chunk in r.iter_content(8192):
+                        if chunk:
+                            f.write(chunk)
+                return True
+
+        except Exception:
+            pass
+
+        time.sleep(2)
+
+    print("failed", url)
+    return False
+
+
+def zip_manga(folder):
+    zip_name = f"{folder}.zip"
+
+    with zipfile.ZipFile(zip_name, "w", zipfile.ZIP_DEFLATED) as z:
+        for root, dirs, files in os.walk(folder):
+            for file in files:
+                path = os.path.join(root, file)
+                z.write(path)
+
+    print("Created zip:", zip_name)
+
 
 def main():
+    code = os.environ.get("MANGA_CODE")
 
-    url=sys.argv[1]
-    code=extract_code(url)
-
-    os.makedirs("output",exist_ok=True)
+    if not code:
+        print("Missing MANGA_CODE env variable")
+        return
 
     print("Fetching manga info...")
+    manga = fetch_json(f"{API}/manga/{code}/")["result"]
 
-    manga=get_json(f"{API}/manga/{code}/")["result"]
+    title = manga["title"]
+    manga_folder = title.replace("/", "_")
 
-    name=safe(manga["title"])
-    base=f"output/{name}"
-
-    os.makedirs(base,exist_ok=True)
+    os.makedirs(manga_folder, exist_ok=True)
 
     print("Fetching chapters...")
+    chapters = fetch_json(f"{API}/chapter?manga={code}")["results"]
 
-    page=1
-    chapters=[]
-
-    while True:
-
-        data=get_json(f"{API}/manga/{code}/chapters?limit=100&page={page}&order[number]=asc")
-
-        items=data["result"]["items"]
-
-        if not items:
-            break
-
-        chapters+=items
-
-        if len(items)<100:
-            break
-
-        page+=1
-
-    # remove duplicate chapter numbers
-    uniq={}
-
-    for c in chapters:
-        n=c["number"]
-        if n not in uniq:
-            uniq[n]=c
-
-    chapters=sorted(uniq.values(),key=lambda x: float(x["number"]))
-
-    print("Total chapters:",len(chapters))
+    print("Total chapters:", len(chapters))
 
     for ch in chapters:
+        chap_num = ch["number"]
+        chap_id = ch["hid"]
 
-        num=ch["number"]
-        cid=ch["chapter_id"]
+        chap_folder = os.path.join(manga_folder, f"chapter_{chap_num}")
+        os.makedirs(chap_folder, exist_ok=True)
 
-        print("Downloading chapter",num)
+        print("Downloading chapter", chap_num)
 
-        data=get_json(f"{API}/chapters/{cid}/")
+        pages = fetch_json(f"{API}/chapter/{chap_id}")["result"]["pages"]
 
-        images=data["result"]["images"]
+        for i, page in enumerate(pages, start=1):
+            img_url = page["url"]
 
-        chap_dir=f"{base}/Chapter_{num}"
-        os.makedirs(chap_dir,exist_ok=True)
+            filename = f"{i:03}.webp"
+            path = os.path.join(chap_folder, filename)
 
-        for i,img in enumerate(images,1):
-
-            img_url=img["url"]
-            ext=img_url.split(".")[-1].split("?")[0]
-
-            file=f"{chap_dir}/{i:03}.{ext}"
-
-            if os.path.exists(file):
+            if os.path.exists(path):
                 continue
 
-            try:
-                download(img_url,file)
-            except:
-                print("failed",img_url)
+            ok = download_image(img_url, path)
 
-    zip_path=f"output/{name}.zip"
+            if not ok:
+                print("failed", img_url)
 
-    print("Creating zip...")
+    zip_manga(manga_folder)
 
-    with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED) as z:
 
-        for root,dirs,files in os.walk(base):
-            for f in files:
-                full=os.path.join(root,f)
-                rel=os.path.relpath(full,base)
-                z.write(full,rel)
-
-    print("Done:",zip_path)
-
-if __name__=="__main__":
+if __name__ == "__main__":
     main()
