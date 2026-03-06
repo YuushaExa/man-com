@@ -1,4 +1,4 @@
-// basic.js - ES Module with Sharp Optimization
+// basic.js - ES Module with Sharp Optimization (ds suffix)
 import fs from 'fs/promises';
 import { existsSync, mkdirSync, appendFileSync } from 'fs';
 import path from 'path';
@@ -13,10 +13,9 @@ const __dirname = path.dirname(__filename);
 const JSON_FILE = process.argv[2] || 'data.json';
 const OPTIMIZE = process.argv[3] === 'true';
 
-// == Sharp WebP Settings (matches Squoosh effort:4, quality:75) ==
 const WEBP_OPTIONS = {
-  quality: 75,    // 1-100, visual quality [[74]]
-  effort: 4,      // 0-6, compression effort (higher = slower but smaller) [[29]]
+  quality: 75,  
+  effort: 4,     
   lossless: false,
   nearLossless: false
 };
@@ -26,23 +25,32 @@ function sanitize(str) {
   return (str || '').toString().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
+// == Helper: Get optimized filename with ds suffix ==
+function getOptimizedFilename(originalPath) {
+  const dir = path.dirname(originalPath);
+  const base = path.basename(originalPath, '.webp');
+  return path.join(dir, `${base}ds.webp`);
+}
+
 // == Helper: Optimize image with Sharp ==
-async function optimizeWithSharp(inputPath, outputPath) {
+async function optimizeWithSharp(inputPath) {
+  const outputPath = getOptimizedFilename(inputPath);
+  
   try {
     await sharp(inputPath)
       .webp(WEBP_OPTIONS)
       .toFile(outputPath);
     
-    // Remove original if optimization succeeded
-    await fs.unlink(inputPath).catch(() => {});
-    return true;
+    // Delete original, keep optimized (ds suffix)
+    await fs.unlink(inputPath);
+    return outputPath;
   } catch (error) {
     console.error(`\n⚠️  Sharp failed for ${path.basename(inputPath)}: ${error.message}`);
-    // Fallback: keep original
-    if (inputPath !== outputPath) {
-      await fs.rename(inputPath, outputPath).catch(() => {});
+    // Fallback: keep original, delete optimized if it exists
+    if (existsSync(outputPath)) {
+      await fs.unlink(outputPath).catch(() => {});
     }
-    return false;
+    return inputPath;
   }
 }
 
@@ -106,7 +114,7 @@ async function run() {
         
         // == Optional: Optimize with Sharp ==
         if (OPTIMIZE) {
-          await optimizeWithSharp(outputFile, outputFile);
+          await optimizeWithSharp(outputFile);
         }
       } catch (error) {
         console.error(`\n❌ Failed to download ${imageUrl}: ${error.message}`);
@@ -138,6 +146,7 @@ async function run() {
   console.log(`✨ Download complete: ${zipName}`);
   if (OPTIMIZE) {
     console.log(`🎨 Images optimized with Sharp (WebP, quality: 75, effort: 4)`);
+    console.log(`📉 Optimized files use 'ds' suffix (e.g., 001ds.webp)`);
   }
 }
 
