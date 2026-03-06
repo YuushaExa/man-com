@@ -1,10 +1,10 @@
-name: Comix Downloader
+name: Manga Downloader
 
 on:
   workflow_dispatch:
     inputs:
-      manga_url:
-        description: "Comix manga URL"
+      manga_code:
+        description: "Manga code from comix.to URL"
         required: true
 
 jobs:
@@ -14,21 +14,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Install deps
+      - name: Install dependencies
         run: |
           pip install cloudscraper requests
 
       - name: Run downloader
-        run: |
-          python downloader.py "${{ github.event.inputs.manga_url }}"
+        run: python downloader.py
+        env:
+          MANGA_CODE: ${{ github.event.inputs.manga_code }}
 
-      - name: Upload zip
+      - name: Upload manga zip
         uses: actions/upload-artifact@v4
         with:
           name: manga
-          path: output/*.zip
+          path: "*.zip"
