@@ -7,18 +7,15 @@ import re
 
 API="https://comix.to/api/v2  "
 
-HEADERS = {
-    "Referer": "https://comix.to/  ",
-    "User-Agent": "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.124 Mobile Safari/537.36"
-}
-
 scraper = cloudscraper.create_scraper(
     browser={
         "browser":"chrome",
         "platform":"windows",
         "mobile":False
     },
-    headers=HEADERS
+    headers={
+        "Referer": "https://comix.to/"
+    }
 )
 
 def extract_code(url):
@@ -35,7 +32,7 @@ def get_json(url):
 
 def download(url,path):
 
-    r=scraper.get(url,stream=True, headers=HEADERS)
+    r=scraper.get(url,stream=True)
     r.raise_for_status()
 
     with open(path,"wb") as f:
