@@ -1,49 +1,54 @@
-// basic.js - ES Module Version
-import fs from 'fs';
+// basic.js - ES Module with Sharp Optimization
+import fs from 'fs/promises';
+import { existsSync, mkdirSync, appendFileSync } from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import sharp from 'sharp';
 
-// == Setup __dirname for ES Modules ==
+// == Configuration ==
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// == Configuration ==
-// Args: node basic.js <json_file> <optimize_flag>
 const JSON_FILE = process.argv[2] || 'data.json';
 const OPTIMIZE = process.argv[3] === 'true';
+
+// == Sharp WebP Settings (matches Squoosh effort:4, quality:75) ==
+const WEBP_OPTIONS = {
+  quality: 75,    // 1-100, visual quality [[74]]
+  effort: 4,      // 0-6, compression effort (higher = slower but smaller) [[29]]
+  lossless: false,
+  nearLossless: false
+};
 
 // == Helper: Sanitize filenames ==
 function sanitize(str) {
   return (str || '').toString().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-// == Helper: Run Squoosh CLI ==
-function optimizeWithSquoosh(inputPath) {
-  // Squoosh 0.7.3 CLI usage: squoosh --webp '{"quality":75}' input.webp
-  // It overwrites the file by default if extension matches, or creates .webp
-  const webpConfig = '{"quality":75,"effort":4}';
-  
-  // Use npx to ensure local node_modules version is used
-  const cmd = `npx squoosh --webp '${webpConfig}' "${inputPath}"`;
-  
+// == Helper: Optimize image with Sharp ==
+async function optimizeWithSharp(inputPath, outputPath) {
   try {
-    execSync(cmd, { stdio: 'pipe', cwd: __dirname });
+    await sharp(inputPath)
+      .webp(WEBP_OPTIONS)
+      .toFile(outputPath);
+    
+    // Remove original if optimization succeeded
+    await fs.unlink(inputPath).catch(() => {});
     return true;
   } catch (error) {
-    console.error(`\n⚠️  Squoosh failed for ${path.basename(inputPath)}: ${error.message}`);
+    console.error(`\n⚠️  Sharp failed for ${path.basename(inputPath)}: ${error.message}`);
+    // Fallback: keep original
+    if (inputPath !== outputPath) {
+      await fs.rename(inputPath, outputPath).catch(() => {});
+    }
     return false;
   }
 }
 
 // == Main Logic ==
-function run() {
-  if (!fs.existsSync(JSON_FILE)) {
-    console.error(`❌ Error: ${JSON_FILE} not found!`);
-    process.exit(1);
-  }
-
-  const data = JSON.parse(fs.readFileSync(JSON_FILE, 'utf8'));
+async function run() {
+  const data = JSON.parse(await fs.readFile(JSON_FILE, 'utf8'));
   
   // == Manga Info ==
   const mangaTitle = sanitize(data.manga.title);
@@ -51,8 +56,8 @@ function run() {
   
   // == Create Base Directory ==
   const baseDir = mangaTitle;
-  if (!fs.existsSync(baseDir)) {
-    fs.mkdirSync(baseDir, { recursive: true });
+  if (!existsSync(baseDir)) {
+    mkdirSync(baseDir, { recursive: true });
   }
   
   // == Track Chapters for Range Naming ==
@@ -66,33 +71,31 @@ function run() {
     const pagesCount = chapter.pages_count;
     const chapterName = chapter.name || '';
     
-    // Format chapter folder
+    // Format chapter folder: Chapter_001_Name or Chapter_001
     const chapterPadded = String(chapterNum).padStart(3, '0');
     const safeChapterName = sanitize(chapterName);
     const chapterDir = safeChapterName
       ? path.join(baseDir, `Chapter_${chapterPadded}_${safeChapterName}`)
       : path.join(baseDir, `Chapter_${chapterPadded}`);
     
-    if (!fs.existsSync(chapterDir)) {
-      fs.mkdirSync(chapterDir, { recursive: true });
+    if (!existsSync(chapterDir)) {
+      mkdirSync(chapterDir, { recursive: true });
     }
     
     console.log(`⬇️  Chapter ${chapterNum}: ${chapterDir} (${pagesCount} pages)`);
     
-    // == Download Each Page ==
+    // == Download Each Page with curl ==
     for (let pageIndex = 0; pageIndex < chapter.images.length; pageIndex++) {
       const imageUrl = chapter.images[pageIndex].trim();
       const pagePadded = String(pageIndex + 1).padStart(3, '0');
+      const outputFile = path.join(chapterDir, `${pagePadded}.webp`);
       
-      // Download to temp file first
-      const tempFile = path.join(chapterDir, `${pagePadded}_temp.webp`);
-      const finalFile = path.join(chapterDir, `${pagePadded}.webp`);
-      
+      // Build curl command with required headers
       const curlCmd = `curl -sL \
         -H "Referer: https://comix.to/" \
         -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
         "${imageUrl}" \
-        -o "${tempFile}" \
+        -o "${outputFile}" \
         --retry 3 \
         --retry-delay 2 \
         --connect-timeout 30`;
@@ -101,33 +104,22 @@ function run() {
         execSync(curlCmd, { stdio: 'pipe' });
         process.stdout.write('.');
         
-        // == Optional: Optimize ==
+        // == Optional: Optimize with Sharp ==
         if (OPTIMIZE) {
-          const success = optimizeWithSquoosh(tempFile);
-          if (success) {
-            // Squoosh outputs to same name usually, but ensure finalFile exists
-            if (fs.existsSync(tempFile)) {
-              fs.renameSync(tempFile, finalFile);
-            }
-          } else {
-            // Fallback: keep original if optimization fails
-            fs.renameSync(tempFile, finalFile);
-          }
-        } else {
-          // No optimization: rename temp to final
-          fs.renameSync(tempFile, finalFile);
+          await optimizeWithSharp(outputFile, outputFile);
         }
       } catch (error) {
         console.error(`\n❌ Failed to download ${imageUrl}: ${error.message}`);
-        if (fs.existsSync(tempFile)) {
-          fs.unlinkSync(tempFile);
+        // Clean up failed download
+        if (existsSync(outputFile)) {
+          await fs.unlink(outputFile).catch(() => {});
         }
       }
     }
     console.log(' ✅ Done');
   }
   
-  // == Generate Zip Name ==
+  // == Generate Zip Name with Chapter Range ==
   const minChapter = Math.min(...chapterNumbers);
   const maxChapter = Math.max(...chapterNumbers);
   const optimizeSuffix = OPTIMIZE ? '_optimized' : '';
@@ -137,22 +129,20 @@ function run() {
   console.log(`\n🗜️  Creating zip archive: ${zipName}`);
   execSync(`zip -rq "${zipName}" "${baseDir}"`, { stdio: 'inherit' });
   
-  // == Output to GitHub ENV ==
+  // == Output to GitHub ENV for next steps ==
   const githubEnv = process.env.GITHUB_ENV;
   if (githubEnv) {
-    fs.appendFileSync(githubEnv, `MANGA_OUTPUT=${zipName}\n`);
+    appendFileSync(githubEnv, `MANGA_OUTPUT=${zipName}\n`);
   }
   
   console.log(`✨ Download complete: ${zipName}`);
   if (OPTIMIZE) {
-    console.log(`🎨 Images optimized with Squoosh v0.7.3 (WebP, quality: 75, effort: 4)`);
+    console.log(`🎨 Images optimized with Sharp (WebP, quality: 75, effort: 4)`);
   }
 }
 
 // == Run ==
-try {
-  run();
-} catch (error) {
+run().catch(error => {
   console.error('💥 Fatal error:', error);
   process.exit(1);
-}
+});
