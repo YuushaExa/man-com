@@ -5,17 +5,15 @@ import os
 import zipfile
 import re
 
-API="https://comix.to/api/v2  "
+API="https://comix.to/api/v2    "
 
 scraper = cloudscraper.create_scraper(
     browser={
-        "browser": "chrome",
-        "platform": "windows",
-        "mobile": False
+        "browser":"chrome",
+        "platform":"windows",
+        "mobile":False
     }
 )
-
-
 
 def extract_code(url):
     slug=url.rstrip("/").split("/")[-1]
