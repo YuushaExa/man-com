@@ -15,9 +15,7 @@ scraper = cloudscraper.create_scraper(
     }
 )
 
-scraper.headers.update({
-    "Referer": "https://comix.to/"
-})
+
 
 def extract_code(url):
     slug=url.rstrip("/").split("/")[-1]
