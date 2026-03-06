@@ -14,15 +14,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Python
+      - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: |
-          pip install playwright
-          playwright install chromium
+          pip install cloudscraper requests
 
       - name: Run downloader
         run: |
