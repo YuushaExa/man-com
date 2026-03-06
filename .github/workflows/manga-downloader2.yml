@@ -21,17 +21,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y curl zip
-          # Node.js 18+ is pre-installed on ubuntu-latest
+          npm ci  # Installs @squoosh/cli from package.json
 
-      - name: Install Squoosh CLI (if optimization enabled)
-        if: inputs.optimize_images == true
-        run: npm install -g @squoosh/cli@0.4.0  # Pin version for stability [[51]]
-
-      - name: Run manga downloader (basic.js)
+      - name: Run manga downloader
         run: |
           node basic.js \
             "${{ github.event.inputs.json_file }}" \
@@ -53,6 +55,6 @@ jobs:
             echo "- 📁 Size: $(du -h "${{ env.MANGA_OUTPUT }}" | cut -f1)" >> $GITHUB_STEP_SUMMARY
             echo "- 📖 Chapters: $(echo "${{ env.MANGA_OUTPUT }}" | grep -oP 'ch\K[^_.]+')" >> $GITHUB_STEP_SUMMARY
             if [ "${{ inputs.optimize_images }}" = "true" ]; then
-              echo "- 🎨 Optimization: Squoosh WebP (quality: 75, effort: 4)" >> $GITHUB_STEP_SUMMARY
+              echo "- 🎨 Optimization: Squoosh v0.7.3 (WebP, Q75, E4)" >> $GITHUB_STEP_SUMMARY
             fi
           fi
