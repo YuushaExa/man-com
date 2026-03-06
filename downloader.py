@@ -7,6 +7,11 @@ import re
 
 API="https://comix.to/api/v2  "
 
+HEADERS = {
+    "Referer": "https://comix.to/  ",
+    "User-Agent": "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.124 Mobile Safari/537.36"
+}
+
 scraper = cloudscraper.create_scraper(
     browser={
         "browser":"chrome",
@@ -15,11 +20,6 @@ scraper = cloudscraper.create_scraper(
     },
     headers=HEADERS
 )
-
-HEADERS = {
-    "Referer": "https://comix.to/  ",
-    "User-Agent": "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.124 Mobile Safari/537.36"
-}
 
 def extract_code(url):
     slug=url.rstrip("/").split("/")[-1]
