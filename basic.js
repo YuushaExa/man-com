@@ -17,7 +17,7 @@ const WEBP_OPTIONS = {
   quality: 75,  
   effort: 4,     
   lossless: false,
-  nearLossless: false
+  smartSubsample: true
 };
 
 // == Helper: Sanitize filenames ==
