@@ -1,0 +1,43 @@
+name: Manga Downloader2
+
+on:
+  workflow_dispatch:
+    inputs:
+      json_file:
+        description: 'Path to data.json file'
+        required: false
+        default: 'data.json'
+
+jobs:
+  download-manga:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl zip
+          # Node.js 18+ is pre-installed on ubuntu-latest
+
+      - name: Run manga downloader (basic.js)
+        run: node basic.js "${{ github.event.inputs.json_file }}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: manga-download
+          path: ${{ env.MANGA_OUTPUT }}
+          retention-days: 9
+          compression-level: 9
+
+      - name: Summary
+        run: |
+          if [ -f "${{ env.MANGA_OUTPUT }}" ]; then
+            echo "## ✅ Download Complete" >> $GITHUB_STEP_SUMMARY
+            echo "- 📦 Archive: \`${{ env.MANGA_OUTPUT }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "- 📁 Size: $(du -h "${{ env.MANGA_OUTPUT }}" | cut -f1)" >> $GITHUB_STEP_SUMMARY
+            echo "- 📖 Chapters: $(echo "${{ env.MANGA_OUTPUT }}" | grep -oP 'ch\K[^.]+')" >> $GITHUB_STEP_SUMMARY
+          fi
