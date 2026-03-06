@@ -22,8 +22,8 @@ jobs:
           sudo apt-get install -y curl zip
           # Node.js 18+ is pre-installed on ubuntu-latest
 
-      - name: Run manga downloader (basic.js)
-        run: node basic.js "${{ github.event.inputs.json_file }}"
+      - name: Run manga downloader (basic.cjs)
+        run: node basic.cjs "${{ github.event.inputs.json_file }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
