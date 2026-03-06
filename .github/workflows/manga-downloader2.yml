@@ -1,4 +1,4 @@
-name: Manga Downloader
+name: Manga Downloader 2
 
 on:
   workflow_dispatch:
@@ -25,13 +25,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '18'
-          cache: 'npm'
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y curl zip
-          npm ci  # Installs @squoosh/cli from package.json
+          npm install
 
       - name: Run manga downloader
         run: |
