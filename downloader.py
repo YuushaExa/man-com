@@ -1,13 +1,9 @@
-import requests
-import os
+import asyncio
 import sys
+import os
 import zipfile
-from urllib.parse import urlparse
-
-HEADERS = {
-    "Referer": "https://comix.to/",
-    "User-Agent": "Mozilla/5.0"
-}
+import re
+from playwright.async_api import async_playwright
 
 API = "https://comix.to/api/v2"
 
@@ -16,98 +12,124 @@ def extract_code(url):
     return slug.split("-")[0]
 
 def safe(s):
-    return "".join(c if c.isalnum() else "_" for c in s)[:100]
+    return re.sub(r"[^a-zA-Z0-9]+","_",s)[:100]
 
-def fetch_json(url):
-    r = requests.get(url, headers=HEADERS)
-    r.raise_for_status()
-    return r.json()
+async def main():
 
-def download_file(url, path):
-    r = requests.get(url, headers=HEADERS, stream=True)
-    r.raise_for_status()
-    with open(path, "wb") as f:
-        for chunk in r.iter_content(8192):
-            f.write(chunk)
+    url = sys.argv[1]
+    code = extract_code(url)
 
-def main():
+    os.makedirs("output", exist_ok=True)
 
-    manga_url = sys.argv[1]
-    code = extract_code(manga_url)
+    async with async_playwright() as p:
 
-    print("Fetching manga info...")
-    manga = fetch_json(f"{API}/manga/{code}/")["result"]
+        browser = await p.chromium.launch()
+        page = await browser.new_page()
 
-    manga_name = safe(manga["title"])
-    base_dir = f"output/{manga_name}"
-    os.makedirs(base_dir, exist_ok=True)
+        print("Opening manga page to pass Cloudflare...")
+        await page.goto(url)
+        await page.wait_for_timeout(5000)
 
-    print("Fetching chapters...")
+        print("Fetching manga info...")
 
-    page = 1
-    chapters = []
+        manga = await page.evaluate(f"""
+            async () => {{
+                const r = await fetch("{API}/manga/{code}/");
+                return await r.json();
+            }}
+        """)
 
-    while True:
-        data = fetch_json(f"{API}/manga/{code}/chapters?limit=100&page={page}&order[number]=asc")
-        items = data["result"]["items"]
-        if not items:
-            break
-        chapters.extend(items)
-        if len(items) < 100:
-            break
-        page += 1
+        manga = manga["result"]
+        manga_name = safe(manga["title"])
 
-    # remove duplicates by chapter number
-    unique = {}
-    for ch in chapters:
-        num = ch["number"]
-        if num not in unique:
-            unique[num] = ch
+        base_dir = f"output/{manga_name}"
+        os.makedirs(base_dir, exist_ok=True)
 
-    chapters = sorted(unique.values(), key=lambda x: float(x["number"]))
+        print("Fetching chapters...")
 
-    print("Total chapters:", len(chapters))
+        page_num = 1
+        chapters = []
 
-    for ch in chapters:
+        while True:
 
-        num = ch["number"]
-        chap_id = ch["chapter_id"]
+            data = await page.evaluate(f"""
+                async () => {{
+                    const r = await fetch("{API}/manga/{code}/chapters?limit=100&page={page_num}&order[number]=asc");
+                    return await r.json();
+                }}
+            """)
 
-        chap_dir = f"{base_dir}/Chapter_{num}"
-        os.makedirs(chap_dir, exist_ok=True)
+            items = data["result"]["items"]
 
-        print("Downloading chapter", num)
+            if not items:
+                break
 
-        data = fetch_json(f"{API}/chapters/{chap_id}/")
-        images = data["result"]["images"]
+            chapters.extend(items)
 
-        for i, img in enumerate(images, start=1):
+            if len(items) < 100:
+                break
 
-            url = img["url"]
-            ext = url.split(".")[-1].split("?")[0]
+            page_num += 1
 
-            filename = f"{chap_dir}/{i:03}.{ext}"
+        # remove duplicates
+        unique = {}
+        for ch in chapters:
+            num = ch["number"]
+            if num not in unique:
+                unique[num] = ch
 
-            if os.path.exists(filename):
-                continue
+        chapters = sorted(unique.values(), key=lambda x: float(x["number"]))
 
-            try:
-                download_file(url, filename)
-            except Exception as e:
-                print("failed", url)
+        print("Total chapters:", len(chapters))
 
-    zip_path = f"output/{manga_name}.zip"
+        for ch in chapters:
 
-    print("Creating zip...")
+            num = ch["number"]
+            chap_id = ch["chapter_id"]
 
-    with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as z:
-        for root, dirs, files in os.walk(base_dir):
-            for file in files:
-                full = os.path.join(root, file)
-                rel = os.path.relpath(full, base_dir)
-                z.write(full, rel)
+            print("Downloading chapter", num)
 
-    print("Done:", zip_path)
+            data = await page.evaluate(f"""
+                async () => {{
+                    const r = await fetch("{API}/chapters/{chap_id}/");
+                    return await r.json();
+                }}
+            """)
 
-if __name__ == "__main__":
-    main()
+            images = data["result"]["images"]
+
+            chap_dir = f"{base_dir}/Chapter_{num}"
+            os.makedirs(chap_dir, exist_ok=True)
+
+            for i,img in enumerate(images,1):
+
+                img_url = img["url"]
+                ext = img_url.split(".")[-1].split("?")[0]
+                filename = f"{chap_dir}/{i:03}.{ext}"
+
+                try:
+                    await page.goto(img_url)
+                    content = await page.content()
+
+                    async with page.expect_download():
+                        pass
+
+                except:
+                    print("failed", img_url)
+
+        zip_path = f"output/{manga_name}.zip"
+
+        print("Creating zip...")
+
+        with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED) as z:
+            for root,_,files in os.walk(base_dir):
+                for f in files:
+                    full=os.path.join(root,f)
+                    rel=os.path.relpath(full,base_dir)
+                    z.write(full,rel)
+
+        print("Done:", zip_path)
+
+        await browser.close()
+
+asyncio.run(main())
