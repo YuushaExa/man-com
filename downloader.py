@@ -17,7 +17,7 @@ scraper = cloudscraper.create_scraper(
 
 HEADERS = {
     "Referer": "https://comix.to/  ",
-    "User-Agent": "Mozilla/5.0"
+    "User-Agent": "Mozilla/5.0 (Linux; Android 16) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.7339.124 Mobile Safari/537.36"
 }
 
 def extract_code(url):
