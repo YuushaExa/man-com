@@ -9,7 +9,8 @@
     "download:tg": "node basic.js data.json true"
   },
   "dependencies": {
-    "sharp": "^0.33.5"
+    "sharp": "^0.33.5",
+    "p-limit": "^5.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
