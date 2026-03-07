@@ -62,7 +62,8 @@ function logError(type, context, error) {
   
   if (type === 'download') {
     logs.downloads.failed.push(entry);
-    console.error(`\n❌ [DOWNLOAD] ${context.chapter}/${context.page} - ${context.url}`);
+    console.error(`\n❌ [DOWNLOAD] Ch${context.chapter}/Pg${context.page}`);
+    console.error(`   URL: ${context.url}`);
     console.error(`   └─ ${error.message}`);
   } else if (type === 'optimize') {
     logs.optimizations.failed.push(entry);
@@ -81,7 +82,6 @@ async function optimizeWithSharp(inputPath) {
     return outputPath;
   } catch (error) {
     logError('optimize', { file: path.basename(inputPath) }, error);
-    // Fallback: keep original
     if (fsSync.existsSync(outputPath)) {
       await fs.unlink(outputPath).catch(() => {});
     }
@@ -176,13 +176,11 @@ async function sendMangaInfo(manga, coverPath) {
     return null;
   }
   
-  // == Helper: Format array fields ==
   const formatList = (arr, label) => {
     if (!arr || !Array.isArray(arr) || arr.length === 0) return '';
     return `\n${label}: ${arr.join(', ')}`;
   };
   
-  // == Build caption with HTML formatting ==
   const title = sanitize(manga.title);
   const description = manga.description 
     ? manga.description.substring(0, 800) + (manga.description.length > 800 ? '...' : '')
@@ -197,7 +195,8 @@ async function sendMangaInfo(manga, coverPath) {
     `🔢 <b>Latest Chapter:</b> ${manga.latest_chapter || 'N/A'}` +
     formatList(manga.genres, '🎭 <b>Genres</b>') +
     formatList(manga.authors, '✍️ <b>Authors</b>') +
-    formatList(manga.artists, '🎨 <b>Artists</b>');
+    formatList(manga.artists, '🎨 <b>Artists</b>') +
+    (manga.url ? `\n🔗 <a href="${manga.url}">Source</a>` : '');
   
   console.log('📤 Sending manga info to Telegram...');
   const messageId = await telegramSendPhoto(caption, coverPath, coverPath);
@@ -208,7 +207,7 @@ async function sendMangaInfo(manga, coverPath) {
   return messageId;
 }
 
-// == Split chapters into zip groups ==
+// == Split chapters into zip groups under size limit ==
 async function createZipGroups(baseDir, chapters, mangaTitle) {
   const groups = [];
   let currentGroup = [];
@@ -243,41 +242,41 @@ async function createZipGroups(baseDir, chapters, mangaTitle) {
     groups.push(currentGroup);
   }
   
-const zipFiles = [];
-for (let i = 0; i < groups.length; i++) {
-  const group = groups[i];
-  const minChapter = group[0].chapter.number;
-  const maxChapter = group[group.length - 1].chapter.number;
+  const zipFiles = [];
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    const minChapter = group[0].chapter.number;
+    const maxChapter = group[group.length - 1].chapter.number;
+    
+    // ✅ Single chapter: ch6 | Range: ch1-3
+    const chapterRange = minChapter === maxChapter 
+      ? `ch${minChapter}` 
+      : `ch${minChapter}-${maxChapter}`;
+    
+    const zipName = `${mangaTitle}_${chapterRange}_ds.zip`;
+    
+    console.log(`🗜️  Creating zip ${i + 1}/${groups.length}: ${zipName}`);
+    
+    const filesToZip = group.map(g => `"${path.relative(baseDir, g.dir)}"`).join(' ');
+    execSync(`cd "${baseDir}" && zip -rq "../${zipName}" ${filesToZip}`, { stdio: 'pipe' });
+    
+    const zipPath = path.join(__dirname, zipName);
+    const zipSize = fsSync.statSync(zipPath).size;
+    console.log(`   📦 ${zipName}: ${formatBytes(zipSize)}`);
+    
+    zipFiles.push({ 
+      path: zipPath, 
+      name: zipName, 
+      minChapter, 
+      maxChapter 
+    });
+  }
   
-  // ✅ Single chapter vs range naming
-  const chapterRange = minChapter === maxChapter 
-    ? `ch${minChapter}` 
-    : `ch${minChapter}-${maxChapter}`;
-  
-  const zipName = `${mangaTitle}_${chapterRange}_ds.zip`;
-  
-  console.log(`🗜️  Creating zip ${i + 1}/${groups.length}: ${zipName}`);
-  
-  const filesToZip = group.map(g => `"${path.relative(baseDir, g.dir)}"`).join(' ');
-  execSync(`cd "${baseDir}" && zip -rq "../${zipName}" ${filesToZip}`, { stdio: 'pipe' });
-  
-  const zipPath = path.join(__dirname, zipName);
-  const zipSize = fsSync.statSync(zipPath).size;
-  console.log(`   📦 ${zipName}: ${formatBytes(zipSize)}`);
-  
-  zipFiles.push({ 
-    path: zipPath, 
-    name: zipName, 
-    minChapter, 
-    maxChapter 
-  });
-}
-
-return zipFiles;
+  return zipFiles;
 }
 
 // == Download single image with curl ==
-async function downloadImage(imageUrl, outputFile, chapterNum, pageNum) {
+async function downloadImage(imageUrl, outputFile) {
   const curlCmd = `curl -sL \
     -H "Referer: https://comix.to/" \
     -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
@@ -313,7 +312,6 @@ async function processChapter(chapter, baseDir) {
   const downloadLimit = pLimit(DOWNLOAD_CONCURRENCY);
   const filesToOptimize = [];
   
-  // Create download tasks for all pages
   const downloadTasks = chapter.images.map((imageUrl, pageIndex) => {
     return downloadLimit(async () => {
       const pagePadded = String(pageIndex + 1).padStart(3, '0');
@@ -327,7 +325,7 @@ async function processChapter(chapter, baseDir) {
       }
       
       try {
-        await downloadImage(imageUrl.trim(), outputFile, chapterNum, pagePadded);
+        await downloadImage(imageUrl.trim(), outputFile);
         process.stdout.write('.');
         logs.downloads.success++;
         
@@ -350,8 +348,7 @@ async function processChapter(chapter, baseDir) {
     });
   });
   
-  // Wait for all downloads to complete
-  const results = await Promise.all(downloadTasks);
+  await Promise.all(downloadTasks);
   
   // == Parallel Optimization ==
   if (OPTIMIZE && filesToOptimize.length > 0) {
@@ -365,17 +362,17 @@ async function processChapter(chapter, baseDir) {
           process.stdout.write('✨');
           return true;
         } catch (error) {
-          // Error already logged in optimizeWithSharp
           return false;
         }
       });
     });
     
     await Promise.all(optimizeTasks);
-    console.log(''); // Newline after progress dots
+    console.log('');
   }
   
   console.log(' ✅ Chapter done');
+  logs.chapters.success++;
   return { success: true, chapter: chapterNum };
 }
 
@@ -387,27 +384,27 @@ function printSummary(startTime) {
   console.log('📊 DOWNLOAD & OPTIMIZATION SUMMARY');
   console.log('═'.repeat(60));
   
-  // Downloads
   const totalDownloads = logs.downloads.success + logs.downloads.failed.length;
   console.log(`📥 Downloads: ${logs.downloads.success}/${totalDownloads} succeeded`);
   if (logs.downloads.failed.length > 0) {
     console.log(`   ❌ Failed: ${logs.downloads.failed.length}`);
     logs.downloads.failed.slice(0, 5).forEach(f => {
-      console.log(`      • Ch${f.context.chapter}/Pg${f.context.page}: ${f.error.substring(0, 60)}...`);
+      const err = f.error.length > 60 ? f.error.substring(0, 60) + '...' : f.error;
+      console.log(`      • Ch${f.context.chapter}/Pg${f.context.page}: ${err}`);
     });
     if (logs.downloads.failed.length > 5) {
       console.log(`      ...and ${logs.downloads.failed.length - 5} more`);
     }
   }
   
-  // Optimizations
   if (OPTIMIZE) {
-    const totalOptimizations = logs.optimizations.success + logs.optimizations.failed.length;
-    console.log(`🎨 Optimizations: ${logs.optimizations.success}/${totalOptimizations} succeeded`);
+    const totalOpt = logs.optimizations.success + logs.optimizations.failed.length;
+    console.log(`🎨 Optimizations: ${logs.optimizations.success}/${totalOpt} succeeded`);
     if (logs.optimizations.failed.length > 0) {
       console.log(`   ❌ Failed: ${logs.optimizations.failed.length}`);
       logs.optimizations.failed.slice(0, 5).forEach(f => {
-        console.log(`      • ${f.context.file}: ${f.error.substring(0, 60)}...`);
+        const err = f.error.length > 60 ? f.error.substring(0, 60) + '...' : f.error;
+        console.log(`      • ${f.context.file}: ${err}`);
       });
       if (logs.optimizations.failed.length > 5) {
         console.log(`      ...and ${logs.optimizations.failed.length - 5} more`);
@@ -418,7 +415,6 @@ function printSummary(startTime) {
   console.log(`⏱️  Total time: ${duration}s`);
   console.log('═'.repeat(60));
   
-  // Log to GitHub summary if available
   if (process.env.GITHUB_STEP_SUMMARY) {
     let summary = `## 📊 Summary\n`;
     summary += `- ⏱️ Duration: ${duration}s\n`;
@@ -426,8 +422,9 @@ function printSummary(startTime) {
     if (OPTIMIZE) {
       summary += `- 🎨 Optimizations: ${logs.optimizations.success}/${logs.optimizations.success + logs.optimizations.failed.length}\n`;
     }
-    if (logs.downloads.failed.length > 0 || logs.optimizations.failed.length > 0) {
-      summary += `- ⚠️ Errors: ${logs.downloads.failed.length + logs.optimizations.failed.length} (check logs)\n`;
+    const totalErrors = logs.downloads.failed.length + logs.optimizations.failed.length;
+    if (totalErrors > 0) {
+      summary += `- ⚠️ Errors: ${totalErrors} (check logs)\n`;
     }
     fsSync.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
   }
@@ -466,19 +463,12 @@ async function run() {
   }
   
   // == Process chapters with parallel concurrency ==
-  const chapterLimit = pLimit(2); // Process 2 chapters at once
-  
+  const chapterLimit = pLimit(2);
   const chapterTasks = chapters.map(ch => 
     chapterLimit(() => processChapter(ch, baseDir))
   );
   
-  const chapterResults = await Promise.all(chapterTasks);
-  
-  // Log chapter-level failures
-  const failedChapters = chapterResults.filter(r => !r.success);
-  if (failedChapters.length > 0) {
-    console.warn(`\n⚠️  ${failedChapters.length} chapter(s) had issues (check logs above)`);
-  }
+  await Promise.all(chapterTasks);
   
   // == Create Split Zips ==
   console.log('\n📦 Calculating zip groups...');
@@ -486,30 +476,31 @@ async function run() {
   
   // == Send to Telegram ==
   let infoMessageId = null;
-// == Send each zip as reply ==
-if (TG_BOT_TOKEN && TG_CHAT_ID && infoMessageId) {
-  for (let i = 0; i < zipFiles.length; i++) {
-    const zip = zipFiles[i];
-    const current = i + 1;
-    const total = zipFiles.length;
+  if (TG_BOT_TOKEN && TG_CHAT_ID) {
+    infoMessageId = await sendMangaInfo(manga, coverPath);
     
-    // ✅ Add progress indicator: 1/1, 1/2, 2/2, etc.
-    const chapterRange = zip.minChapter === zip.maxChapter 
-      ? `${zip.minChapter}` 
-      : `${zip.minChapter}-${zip.maxChapter}`;
+    for (let i = 0; i < zipFiles.length; i++) {
+      const zip = zipFiles[i];
+      const current = i + 1;
+      const total = zipFiles.length;
+      
+      // ✅ Single chapter vs range display in caption
+      const chapterRange = zip.minChapter === zip.maxChapter 
+        ? `${zip.minChapter}` 
+        : `${zip.minChapter}-${zip.maxChapter}`;
+      
+      const caption = `📦 <b>${mangaTitle}</b>\n` +
+        `Chapters ${chapterRange}\n` +
+        `🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}, ${current}/${total}\n` +
+        `📁 ${formatBytes(fsSync.statSync(zip.path).size)}`;
+      
+      console.log(`📤 Sending ${zip.name} to Telegram...`);
+      await telegramSendDocument(zip.path, caption, infoMessageId, coverPath);
+      console.log(`✅ Sent: ${zip.name}`);
+    }
     
-    const caption = `📦 <b>${mangaTitle}</b>\n` +
-      `Chapters ${chapterRange}\n` +
-      `🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}, ${current}/${total}\n` +
-      `📁 ${formatBytes(fsSync.statSync(zip.path).size)}`;
-    
-    console.log(`📤 Sending ${zip.name} to Telegram...`);
-    await telegramSendDocument(zip.path, caption, infoMessageId, coverPath);
-    console.log(`✅ Sent: ${zip.name}`);
-  }
-  
-  console.log('✨ All files sent to Telegram!');
-} else {
+    console.log('✨ All files sent to Telegram!');
+  } else {
     console.log('\n⚠️  Telegram not configured. Zips created locally:');
     zipFiles.forEach(z => console.log(`   - ${z.name}`));
   }
@@ -521,6 +512,6 @@ if (TG_BOT_TOKEN && TG_CHAT_ID && infoMessageId) {
 // == Run ==
 run().catch(error => {
   console.error('💥 Fatal error:', error);
-  printSummary(Date.now()); // Try to print partial summary
+  printSummary(Date.now());
   process.exit(1);
 });
