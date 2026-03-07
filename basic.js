@@ -1,6 +1,6 @@
-// basic.js - ES Module with Sharp Optimization (ds suffix)
+// basic.js - ES Module | Sharp Optimization | Telegram | Split Zips
 import fs from 'fs/promises';
-import { existsSync, mkdirSync, appendFileSync } from 'fs';
+import { existsSync, mkdirSync, appendFileSync, statSync } from 'fs';
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
@@ -12,142 +12,307 @@ const __dirname = path.dirname(__filename);
 
 const JSON_FILE = process.argv[2] || 'data.json';
 const OPTIMIZE = process.argv[3] === 'true';
+const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN || '';
+const TG_CHAT_ID = process.env.TG_CHAT_ID || '';
 
+// == Sharp WebP Settings ==
 const WEBP_OPTIONS = {
-  quality: 75,  
-  effort: 4,     
+  quality: 75,
+  effort: 4,
   lossless: false,
   smartSubsample: true
 };
 
-// == Helper: Sanitize filenames ==
+// == Telegram Config ==
+const TG_API = 'https://api.telegram.org/bot';
+const TG_DELAY_MS = 3000; // 3 seconds between sends
+const MAX_ZIP_SIZE_MB = 49;
+const TARGET_ZIP_SIZE_MB = 45; // Buffer for safety
+
+// == Helpers ==
 function sanitize(str) {
   return (str || '').toString().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-// == Helper: Get optimized filename with ds suffix ==
 function getOptimizedFilename(originalPath) {
   const dir = path.dirname(originalPath);
   const base = path.basename(originalPath, '.webp');
   return path.join(dir, `${base}ds.webp`);
 }
 
-// == Helper: Optimize image with Sharp ==
 async function optimizeWithSharp(inputPath) {
   const outputPath = getOptimizedFilename(inputPath);
-  
   try {
-    await sharp(inputPath)
-      .webp(WEBP_OPTIONS)
-      .toFile(outputPath);
-    
-    // Delete original, keep optimized (ds suffix)
+    await sharp(inputPath).webp(WEBP_OPTIONS).toFile(outputPath);
     await fs.unlink(inputPath);
     return outputPath;
   } catch (error) {
     console.error(`\n⚠️  Sharp failed for ${path.basename(inputPath)}: ${error.message}`);
-    // Fallback: keep original, delete optimized if it exists
-    if (existsSync(outputPath)) {
-      await fs.unlink(outputPath).catch(() => {});
-    }
+    if (existsSync(outputPath)) await fs.unlink(outputPath).catch(() => {});
     return inputPath;
   }
+}
+
+function getFolderSize(folderPath) {
+  let total = 0;
+  const walk = (dir) => {
+    const files = existsSync(dir) ? fs.readdirSync(dir) : [];
+    for (const file of files) {
+      const filePath = path.join(dir, file);
+      const stat = statSync(filePath);
+      if (stat.isDirectory()) {
+        walk(filePath);
+      } else {
+        total += stat.size;
+      }
+    }
+  };
+  walk(folderPath);
+  return total;
+}
+
+function formatBytes(bytes) {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+async function telegramSendPhoto(caption, photoPath, thumbPath) {
+  if (!TG_BOT_TOKEN || !TG_CHAT_ID) return null;
+  
+  const formData = new FormData();
+  formData.append('chat_id', TG_CHAT_ID);
+  formData.append('caption', caption);
+  formData.append('parse_mode', 'HTML');
+  
+  const photoBlob = await fs.readFile(photoPath);
+  formData.append('photo', new Blob([photoBlob]), path.basename(photoPath));
+  
+  if (thumbPath && existsSync(thumbPath)) {
+    const thumbBlob = await fs.readFile(thumbPath);
+    formData.append('thumbnail', new Blob([thumbBlob]), path.basename(thumbPath));
+  }
+  
+  const response = await fetch(`${TG_API}${TG_BOT_TOKEN}/sendPhoto`, {
+    method: 'POST',
+    body: formData
+  });
+  
+  const result = await response.json();
+  return result.ok ? result.result.message_id : null;
+}
+
+async function telegramSendDocument(filePath, caption, replyToMessageId, thumbPath) {
+  if (!TG_BOT_TOKEN || !TG_CHAT_ID) return;
+  
+  const formData = new FormData();
+  formData.append('chat_id', TG_CHAT_ID);
+  formData.append('document', new Blob([await fs.readFile(filePath)]), path.basename(filePath));
+  formData.append('caption', caption);
+  formData.append('parse_mode', 'HTML');
+  
+  if (replyToMessageId) {
+    formData.append('reply_to_message_id', replyToMessageId);
+  }
+  
+  if (thumbPath && existsSync(thumbPath)) {
+    formData.append('thumbnail', new Blob([await fs.readFile(thumbPath)]), path.basename(thumbPath));
+  }
+  
+  await fetch(`${TG_API}${TG_BOT_TOKEN}/sendDocument`, {
+    method: 'POST',
+    body: formData
+  });
+  
+  // Delay between sends
+  await new Promise(resolve => setTimeout(resolve, TG_DELAY_MS));
+}
+
+async function sendMangaInfo(manga, coverPath) {
+  if (!TG_BOT_TOKEN || !TG_CHAT_ID) {
+    console.log('⚠️  Telegram not configured (missing TG_BOT_TOKEN or TG_CHAT_ID)');
+    return null;
+  }
+  
+  const caption = `<b>${sanitize(manga.title)}</b>\n` +
+    `📖 ${manga.description?.substring(0, 800) || 'No description'}\n\n` +
+    `🏷️ Type: ${manga.type || 'N/A'}\n` +
+    `🌐 Language: ${manga.language || 'N/A'}\n` +
+    `📊 Status: ${manga.status || 'N/A'}\n` +
+    `📅 Year: ${manga.year || 'N/A'}\n` +
+    `🔢 Latest Chapter: ${manga.latest_chapter || 'N/A'}`;
+  
+  console.log('📤 Sending manga info to Telegram...');
+  const messageId = await telegramSendPhoto(caption, coverPath, coverPath);
+  
+  if (messageId) {
+    console.log(`✅ Manga info sent (message_id: ${messageId})`);
+  }
+  return messageId;
+}
+
+// == Split chapters into zip groups under size limit ==
+async function createZipGroups(baseDir, chapters, mangaTitle) {
+  const groups = [];
+  let currentGroup = [];
+  let currentSize = 0;
+  
+  // Estimate size per chapter folder
+  const chapterSizes = [];
+  for (const chapter of chapters) {
+    const chapterPadded = String(chapter.number).padStart(3, '0');
+    const safeChapterName = sanitize(chapter.name || '');
+    const chapterDir = safeChapterName
+      ? path.join(baseDir, `Chapter_${chapterPadded}_${safeChapterName}`)
+      : path.join(baseDir, `Chapter_${chapterPadded}`);
+    
+    const size = getFolderSize(chapterDir);
+    chapterSizes.push({ chapter, dir: chapterDir, size });
+  }
+  
+  // Group chapters to stay under target size
+  for (const item of chapterSizes) {
+    // Add buffer for zip overhead (~10%)
+    const estimatedZipSize = item.size * 1.1;
+    
+    if (currentSize + estimatedZipSize > TARGET_ZIP_SIZE_MB * 1024 * 1024 && currentGroup.length > 0) {
+      // Start new group
+      groups.push(currentGroup);
+      currentGroup = [item];
+      currentSize = item.size;
+    } else {
+      currentGroup.push(item);
+      currentSize += item.size;
+    }
+  }
+  
+  if (currentGroup.length > 0) {
+    groups.push(currentGroup);
+  }
+  
+  // Create zip files for each group
+  const zipFiles = [];
+  for (let i = 0; i < groups.length; i++) {
+    const group = groups[i];
+    const minChapter = group[0].chapter.number;
+    const maxChapter = group[group.length - 1].chapter.number;
+    const zipName = `${mangaTitle}_ch${minChapter}-${maxChapter}_ds.zip`;
+    
+    console.log(`🗜️  Creating zip ${i + 1}/${groups.length}: ${zipName}`);
+    
+    // Build zip command with only chapters in this group
+    const filesToZip = group.map(g => `"${path.relative(baseDir, g.dir)}"`).join(' ');
+    execSync(`cd "${baseDir}" && zip -rq "../${zipName}" ${filesToZip}`, { stdio: 'pipe' });
+    
+    const zipPath = path.join(__dirname, zipName);
+    const zipSize = statSync(zipPath).size;
+    console.log(`   📦 ${zipName}: ${formatBytes(zipSize)}`);
+    
+    zipFiles.push({ path: zipPath, name: zipName, minChapter, maxChapter });
+  }
+  
+  return zipFiles;
 }
 
 // == Main Logic ==
 async function run() {
   const data = JSON.parse(await fs.readFile(JSON_FILE, 'utf8'));
+  const manga = data.manga;
+  const chapters = data.chapters;
   
-  // == Manga Info ==
-  const mangaTitle = sanitize(data.manga.title);
+  const mangaTitle = sanitize(manga.title);
   console.log(`📚 Downloading: ${mangaTitle}`);
+  
+  // == Download cover image for Telegram thumbnail ==
+  let coverPath = null;
+  if (manga.cover && TG_BOT_TOKEN) {
+    coverPath = path.join(__dirname, `${mangaTitle}_cover.jpg`);
+    const curlCmd = `curl -sL -o "${coverPath}" "${manga.cover}" --retry 3 --connect-timeout 30`;
+    try {
+      execSync(curlCmd, { stdio: 'pipe' });
+      console.log('🖼️  Cover downloaded for Telegram thumbnail');
+    } catch (e) {
+      console.warn('⚠️  Failed to download cover:', e.message);
+      coverPath = null;
+    }
+  }
   
   // == Create Base Directory ==
   const baseDir = mangaTitle;
-  if (!existsSync(baseDir)) {
-    mkdirSync(baseDir, { recursive: true });
-  }
+  if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
   
-  // == Track Chapters for Range Naming ==
-  const chapterNumbers = [];
-  
-  // == Process Each Chapter ==
-  for (const chapter of data.chapters) {
+  // == Download & Optimize Chapters ==
+  for (const chapter of chapters) {
     const chapterNum = chapter.number;
-    chapterNumbers.push(chapterNum);
-    
     const pagesCount = chapter.pages_count;
     const chapterName = chapter.name || '';
     
-    // Format chapter folder: Chapter_001_Name or Chapter_001
     const chapterPadded = String(chapterNum).padStart(3, '0');
     const safeChapterName = sanitize(chapterName);
     const chapterDir = safeChapterName
       ? path.join(baseDir, `Chapter_${chapterPadded}_${safeChapterName}`)
       : path.join(baseDir, `Chapter_${chapterPadded}`);
     
-    if (!existsSync(chapterDir)) {
-      mkdirSync(chapterDir, { recursive: true });
-    }
+    if (!existsSync(chapterDir)) mkdirSync(chapterDir, { recursive: true });
     
     console.log(`⬇️  Chapter ${chapterNum}: ${chapterDir} (${pagesCount} pages)`);
     
-    // == Download Each Page with curl ==
     for (let pageIndex = 0; pageIndex < chapter.images.length; pageIndex++) {
       const imageUrl = chapter.images[pageIndex].trim();
       const pagePadded = String(pageIndex + 1).padStart(3, '0');
       const outputFile = path.join(chapterDir, `${pagePadded}.webp`);
       
-      // Build curl command with required headers
       const curlCmd = `curl -sL \
         -H "Referer: https://comix.to/" \
         -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
         "${imageUrl}" \
         -o "${outputFile}" \
-        --retry 3 \
-        --retry-delay 2 \
-        --connect-timeout 30`;
+        --retry 3 --retry-delay 2 --connect-timeout 30`;
       
       try {
         execSync(curlCmd, { stdio: 'pipe' });
         process.stdout.write('.');
         
-        // == Optional: Optimize with Sharp ==
         if (OPTIMIZE) {
           await optimizeWithSharp(outputFile);
         }
       } catch (error) {
-        console.error(`\n❌ Failed to download ${imageUrl}: ${error.message}`);
-        // Clean up failed download
-        if (existsSync(outputFile)) {
-          await fs.unlink(outputFile).catch(() => {});
-        }
+        console.error(`\n❌ Failed: ${imageUrl}`);
+        if (existsSync(outputFile)) await fs.unlink(outputFile).catch(() => {});
       }
     }
     console.log(' ✅ Done');
   }
   
-  // == Generate Zip Name with Chapter Range ==
-  const minChapter = Math.min(...chapterNumbers);
-  const maxChapter = Math.max(...chapterNumbers);
-  const optimizeSuffix = OPTIMIZE ? '_optimized' : '';
-  const zipName = `${mangaTitle}_ch${minChapter}-${maxChapter}${optimizeSuffix}.zip`;
+  // == Create Split Zips ==
+  console.log('\n📦 Calculating zip groups...');
+  const zipFiles = await createZipGroups(baseDir, chapters, mangaTitle);
   
-  // == Create Zip Archive ==
-  console.log(`\n🗜️  Creating zip archive: ${zipName}`);
-  execSync(`zip -rq "${zipName}" "${baseDir}"`, { stdio: 'inherit' });
-  
-  // == Output to GitHub ENV for next steps ==
-  const githubEnv = process.env.GITHUB_ENV;
-  if (githubEnv) {
-    appendFileSync(githubEnv, `MANGA_OUTPUT=${zipName}\n`);
+  // == Send to Telegram ==
+  if (TG_BOT_TOKEN && TG_CHAT_ID) {
+    // Send manga info first
+    const infoMessageId = await sendMangaInfo(manga, coverPath);
+    
+    // Send each zip as reply
+    for (const zip of zipFiles) {
+      const caption = `📦 <b>${mangaTitle}</b>\nChapters ${zip.minChapter}-${zip.maxChapter}\n🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}\n📁 ${formatBytes(statSync(zip.path).size)}`;
+      
+      console.log(`📤 Sending ${zip.name} to Telegram...`);
+      await telegramSendDocument(zip.path, caption, infoMessageId, coverPath);
+      console.log(`✅ Sent: ${zip.name}`);
+    }
+    
+    console.log('✨ All files sent to Telegram!');
+  } else {
+    console.log('\n⚠️  Telegram not configured. Zips created locally:');
+    zipFiles.forEach(z => console.log(`   - ${z.name}`));
   }
   
-  console.log(`✨ Download complete: ${zipName}`);
-  if (OPTIMIZE) {
-    console.log(`🎨 Images optimized with Sharp (WebP, quality: 75, effort: 4)`);
-    console.log(`📉 Optimized files use 'ds' suffix (e.g., 001ds.webp)`);
-  }
+  // == Cleanup (optional) ==
+  // await fs.rm(baseDir, { recursive: true, force: true });
+  // zipFiles.forEach(z => fs.unlink(z.path).catch(() => {}));
 }
 
 // == Run ==
