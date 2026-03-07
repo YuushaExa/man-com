@@ -187,7 +187,7 @@ async function sendMangaInfo(manga, coverPath) {
     : 'No description available';
   
   const caption = `<b>${title}</b>\n` +
-    `📖 ${description}\n\n` +
+    `${description}\n` +
     `🏷️ <b>Type:</b> ${manga.type || 'N/A'}\n` +
     `🌐 <b>Language:</b> ${manga.language || 'N/A'}\n` +
     `📊 <b>Status:</b> ${manga.status || 'N/A'}\n` +
@@ -195,8 +195,7 @@ async function sendMangaInfo(manga, coverPath) {
     `🔢 <b>Latest Chapter:</b> ${manga.latest_chapter || 'N/A'}` +
     formatList(manga.genres, '🎭 <b>Genres</b>') +
     formatList(manga.authors, '✍️ <b>Authors</b>') +
-    formatList(manga.artists, '🎨 <b>Artists</b>') +
-    (manga.url ? `\n🔗 <a href="${manga.url}">Source</a>` : '');
+    formatList(manga.artists, '🎨 <b>Artists</b>');
   
   console.log('📤 Sending manga info to Telegram...');
   const messageId = await telegramSendPhoto(caption, coverPath, coverPath);
