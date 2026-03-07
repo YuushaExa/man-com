@@ -1,6 +1,10 @@
 {
-  "status": "Processing",
-  "icon": "🔴",
-  "timestamp": "2026-03-07T23:35:48Z",
-  "summary": null
+  "status": "Ready",
+  "icon": "🟢",
+  "timestamp": "2026-03-07T23:37:35Z",
+  "summary": {
+    "downloads": "228/228",
+    "optimizations": "228/228",
+    "total_time": "96.0s"
+  }
 }
