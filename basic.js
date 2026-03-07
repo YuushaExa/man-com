@@ -243,26 +243,37 @@ async function createZipGroups(baseDir, chapters, mangaTitle) {
     groups.push(currentGroup);
   }
   
-  const zipFiles = [];
-  for (let i = 0; i < groups.length; i++) {
-    const group = groups[i];
-    const minChapter = group[0].chapter.number;
-    const maxChapter = group[group.length - 1].chapter.number;
-    const zipName = `${mangaTitle}_ch${minChapter}-${maxChapter}_ds.zip`;
-    
-    console.log(`🗜️  Creating zip ${i + 1}/${groups.length}: ${zipName}`);
-    
-    const filesToZip = group.map(g => `"${path.relative(baseDir, g.dir)}"`).join(' ');
-    execSync(`cd "${baseDir}" && zip -rq "../${zipName}" ${filesToZip}`, { stdio: 'pipe' });
-    
-    const zipPath = path.join(__dirname, zipName);
-    const zipSize = fsSync.statSync(zipPath).size;
-    console.log(`   📦 ${zipName}: ${formatBytes(zipSize)}`);
-    
-    zipFiles.push({ path: zipPath, name: zipName, minChapter, maxChapter });
-  }
+const zipFiles = [];
+for (let i = 0; i < groups.length; i++) {
+  const group = groups[i];
+  const minChapter = group[0].chapter.number;
+  const maxChapter = group[group.length - 1].chapter.number;
   
-  return zipFiles;
+  // ✅ Single chapter vs range naming
+  const chapterRange = minChapter === maxChapter 
+    ? `ch${minChapter}` 
+    : `ch${minChapter}-${maxChapter}`;
+  
+  const zipName = `${mangaTitle}_${chapterRange}_ds.zip`;
+  
+  console.log(`🗜️  Creating zip ${i + 1}/${groups.length}: ${zipName}`);
+  
+  const filesToZip = group.map(g => `"${path.relative(baseDir, g.dir)}"`).join(' ');
+  execSync(`cd "${baseDir}" && zip -rq "../${zipName}" ${filesToZip}`, { stdio: 'pipe' });
+  
+  const zipPath = path.join(__dirname, zipName);
+  const zipSize = fsSync.statSync(zipPath).size;
+  console.log(`   📦 ${zipName}: ${formatBytes(zipSize)}`);
+  
+  zipFiles.push({ 
+    path: zipPath, 
+    name: zipName, 
+    minChapter, 
+    maxChapter 
+  });
+}
+
+return zipFiles;
 }
 
 // == Download single image with curl ==
@@ -475,19 +486,30 @@ async function run() {
   
   // == Send to Telegram ==
   let infoMessageId = null;
-  if (TG_BOT_TOKEN && TG_CHAT_ID) {
-    infoMessageId = await sendMangaInfo(manga, coverPath);
+// == Send each zip as reply ==
+if (TG_BOT_TOKEN && TG_CHAT_ID && infoMessageId) {
+  for (let i = 0; i < zipFiles.length; i++) {
+    const zip = zipFiles[i];
+    const current = i + 1;
+    const total = zipFiles.length;
     
-    for (const zip of zipFiles) {
-      const caption = `📦 <b>${mangaTitle}</b>\nChapters ${zip.minChapter}-${zip.maxChapter}\n🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}\n📁 ${formatBytes(fsSync.statSync(zip.path).size)}`;
-      
-      console.log(`📤 Sending ${zip.name} to Telegram...`);
-      await telegramSendDocument(zip.path, caption, infoMessageId, coverPath);
-      console.log(`✅ Sent: ${zip.name}`);
-    }
+    // ✅ Add progress indicator: 1/1, 1/2, 2/2, etc.
+    const chapterRange = zip.minChapter === zip.maxChapter 
+      ? `${zip.minChapter}` 
+      : `${zip.minChapter}-${zip.maxChapter}`;
     
-    console.log('✨ All files sent to Telegram!');
-  } else {
+    const caption = `📦 <b>${mangaTitle}</b>\n` +
+      `Chapters ${chapterRange}\n` +
+      `🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}, ${current}/${total}\n` +
+      `📁 ${formatBytes(fsSync.statSync(zip.path).size)}`;
+    
+    console.log(`📤 Sending ${zip.name} to Telegram...`);
+    await telegramSendDocument(zip.path, caption, infoMessageId, coverPath);
+    console.log(`✅ Sent: ${zip.name}`);
+  }
+  
+  console.log('✨ All files sent to Telegram!');
+} else {
     console.log('\n⚠️  Telegram not configured. Zips created locally:');
     zipFiles.forEach(z => console.log(`   - ${z.name}`));
   }
