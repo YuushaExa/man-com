@@ -1,32 +1,60 @@
 {
   "manga": {
-    "title": "A Bright Transfer Student",
-    "url": "https://comix.to/title/2zgmn-a-bright-transfer-student",
-    "cover": "https://static.comix.to/c0b3/i/2/9a/696edcf02f55a.jpg",
-    "description": "No description available.",
-    "type": "other",
+    "title": "Jukai",
+    "url": "https://comix.to/title/35n20-jukai",
+    "cover": "https://static.comix.to/339b/i/e/3e/68dfceb80ccd2.jpg",
+    "description": "Kuyou Temple is a place where all kinds of cursed objects are brought.\n\nOne day, the head priest of a neighboring temple risked his life to deliver a book called the “Record of the Strange.”\n\nBut what happens when that book is opened…?!",
+    "type": "manga",
     "language": "ja",
-    "status": "finished",
+    "status": "releasing",
     "year": 2025,
-    "latest_chapter": "?"
+    "latest_chapter": 6,
+    "genres": [
+      "Horror",
+      "Mystery",
+      "Psychological",
+      "Tragedy"
+    ],
+    "authors": [
+      "Saito Ryoga"
+    ],
+    "artists": [
+      "Saito Ryoga"
+    ]
   },
   "chapters": [
     {
-      "chapter_id": 7528146,
-      "number": 0,
-      "name": null,
-      "scanlation_group": "Soukyuu Scans",
+      "chapter_id": 7296854,
+      "number": 6,
+      "name": "Record Six: The Calling Voice",
+      "scanlation_group": "Spiraphobia Scans",
       "language": "en",
-      "pages_count": 8,
+      "pages_count": 24,
       "images": [
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/1.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/2.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/3.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/4.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/5.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/6.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/7.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/8.webp"
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/01.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/02.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/03.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/04.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/05.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/06.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/07.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/08.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/09.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/10.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/11.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/12.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/13.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/14.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/15.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/16.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/17.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/18.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/19.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/20.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/21.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/22.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/23.webp",
+        "https://jloo.wowpic5.store/ii/bEqPbYfoKT0Gm03lRkKfuBJU0rkBd/24.webp"
       ]
     }
   ]
