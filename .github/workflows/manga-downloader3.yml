@@ -27,6 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: true
+          fetch-depth: 0
 
       - name: Configure Git
         run: |
@@ -38,7 +39,8 @@ jobs:
           TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           echo "{\"status\": \"Processing\", \"icon\": \"🔴\", \"timestamp\": \"$TIMESTAMP\"}" > status.json
           git add status.json
-          git commit -m "chore: status processing [skip ci]"
+          git diff --cached --quiet || git commit -m "chore: status processing [skip ci]"
+          git pull --rebase origin ${{ github.ref_name }} || true
           git push origin HEAD:${{ github.ref_name }}
 
       - name: Setup Node.js
@@ -61,18 +63,27 @@ jobs:
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}"
 
+      - name: Cleanup downloaded files
+        run: |
+          rm -rf node_modules/
+          rm -rf *_ds.zip
+          rm -rf *_cover.jpg
+          rm -rf Miren_no_Tonbo/
+          find . -type d -name "*_ds" -exec rm -rf {} + 2>/dev/null || true
+
       - name: Update Status Final
         if: always()
         run: |
           TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           if [ "${{ job.status }}" == "success" ]; then
             echo "{\"status\": \"Ready\", \"icon\": \"🟢\", \"timestamp\": \"$TIMESTAMP\"}" > status.json
-            git commit -m "chore: status ready [skip ci]"
+            git commit -m "chore: status ready [skip ci]" || true
           else
             echo "{\"status\": \"Failed\", \"icon\": \"❌\", \"timestamp\": \"$TIMESTAMP\"}" > status.json
-            git commit -m "chore: status failed [skip ci]"
+            git commit -m "chore: status failed [skip ci]" || true
           fi
           git add status.json
+          git pull --rebase origin ${{ github.ref_name }} || true
           git push origin HEAD:${{ github.ref_name }}
 
       - name: Summary
