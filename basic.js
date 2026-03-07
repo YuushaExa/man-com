@@ -186,8 +186,8 @@ async function sendMangaInfo(manga, coverPath) {
     ? manga.description.substring(0, 800) + (manga.description.length > 800 ? '...' : '')
     : 'No description available';
   
-  const caption = `<b>${title}</b>\n\n` +
-    `${description}\n\n` +
+  const caption = `<b>${title}</b>\n` +
+    `${description}\n` +
     `🏷️ <b>Type:</b> ${manga.type || 'N/A'}\n` +
     `🌐 <b>Language:</b> ${manga.language || 'N/A'}\n` +
     `📊 <b>Status:</b> ${manga.status || 'N/A'}\n` +
