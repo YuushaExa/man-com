@@ -1,0 +1,51 @@
+name: Manga Downloader → Telegram
+
+on:
+  workflow_dispatch:
+    inputs:
+      json_file:
+        description: 'Path to data.json file'
+        required: false
+        default: 'data.json'
+      optimize_images:
+        description: 'Optimize with Sharp (WebP, quality: 75, effort: 4)'
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  download-and-send:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y curl zip
+          npm install
+
+      - name: Run downloader + Telegram sender
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
+        run: |
+          node basic.js \
+            "${{ github.event.inputs.json_file }}" \
+            "${{ inputs.optimize_images }}"
+
+      - name: Summary
+        run: |
+          echo "## ✅ Process Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- 📤 Files sent directly to Telegram" >> $GITHUB_STEP_SUMMARY
+          echo "- 🗑️ No artifacts saved (Telegram delivery only)" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.optimize_images }}" = "true" ]; then
+            echo "- 🎨 Optimization: Sharp WebP (quality: 75, effort: 4, ds suffix)" >> $GITHUB_STEP_SUMMARY
+          fi
