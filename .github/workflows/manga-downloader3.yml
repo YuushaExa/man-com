@@ -12,6 +12,9 @@ on:
         required: false
         type: boolean
         default: true
+  push:
+    paths:
+      - 'data.json'
 
 jobs:
   download-and-send:
@@ -37,15 +40,17 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
+          # Uses input if manual dispatch, otherwise defaults to 'data.json' and true
           node basic.js \
-            "${{ github.event.inputs.json_file }}" \
-            "${{ inputs.optimize_images }}"
+            "${{ github.event.inputs.json_file || 'data.json' }}" \
+            "${{ github.event.inputs.optimize_images || true }}"
 
       - name: Summary
         run: |
           echo "## ✅ Process Complete" >> $GITHUB_STEP_SUMMARY
           echo "- 📤 Files sent directly to Telegram" >> $GITHUB_STEP_SUMMARY
           echo "- 🗑️ No artifacts saved (Telegram delivery only)" >> $GITHUB_STEP_SUMMARY
-          if [ "${{ inputs.optimize_images }}" = "true" ]; then
+          # Check optimization flag safely for both push and dispatch events
+          if [ "${{ github.event.inputs.optimize_images || true }}" = "true" ]; then
             echo "- 🎨 Optimization: Sharp WebP (quality: 75, effort: 4, ds suffix)" >> $GITHUB_STEP_SUMMARY
           fi
