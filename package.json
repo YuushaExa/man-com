@@ -1,12 +1,12 @@
 {
   "name": "manga-downloader",
   "version": "1.0.0",
-  "description": "Download and optimize manga chapters with GitHub Actions",
+  "description": "Download, optimize, and send manga to Telegram",
   "type": "module",
   "main": "basic.js",
   "scripts": {
     "download": "node basic.js",
-    "download:optimize": "node basic.js data.json true"
+    "download:tg": "node basic.js data.json true"
   },
   "dependencies": {
     "sharp": "^0.33.5"
@@ -14,11 +14,5 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "keywords": [
-    "manga",
-    "downloader",
-    "webp",
-    "optimization"
-  ],
   "license": "MIT"
 }
