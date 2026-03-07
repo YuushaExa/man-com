@@ -33,9 +33,10 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
-      - name: Update Status: Processing
+      - name: Update Status Processing
         run: |
-          echo '{"status": "Processing", "icon": "🔴", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > status.json
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          echo "{\"status\": \"Processing\", \"icon\": \"🔴\", \"timestamp\": \"$TIMESTAMP\"}" > status.json
           git add status.json
           git commit -m "chore: status processing [skip ci]"
           git push origin HEAD:${{ github.ref_name }}
@@ -60,18 +61,18 @@ jobs:
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}"
 
-      - name: Update Status: Ready
+      - name: Update Status Final
         if: always()
         run: |
+          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           if [ "${{ job.status }}" == "success" ]; then
-            echo '{"status": "Ready", "icon": "🟢", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > status.json
-            MSG="chore: status ready [skip ci]"
+            echo "{\"status\": \"Ready\", \"icon\": \"🟢\", \"timestamp\": \"$TIMESTAMP\"}" > status.json
+            git commit -m "chore: status ready [skip ci]"
           else
-            echo '{"status": "Failed", "icon": "❌", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > status.json
-            MSG="chore: status failed [skip ci]"
+            echo "{\"status\": \"Failed\", \"icon\": \"❌\", \"timestamp\": \"$TIMESTAMP\"}" > status.json
+            git commit -m "chore: status failed [skip ci]"
           fi
           git add status.json
-          git commit -m "$MSG"
           git push origin HEAD:${{ github.ref_name }}
 
       - name: Summary
