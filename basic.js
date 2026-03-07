@@ -176,13 +176,28 @@ async function sendMangaInfo(manga, coverPath) {
     return null;
   }
   
-  const caption = `<b>${sanitize(manga.title)}</b>\n` +
-    `📖 ${manga.description?.substring(0, 800) || 'No description'}\n\n` +
-    `🏷️ Type: ${manga.type || 'N/A'}\n` +
-    `🌐 Language: ${manga.language || 'N/A'}\n` +
-    `📊 Status: ${manga.status || 'N/A'}\n` +
-    `📅 Year: ${manga.year || 'N/A'}\n` +
-    `🔢 Latest Chapter: ${manga.latest_chapter || 'N/A'}`;
+  // == Helper: Format array fields ==
+  const formatList = (arr, label) => {
+    if (!arr || !Array.isArray(arr) || arr.length === 0) return '';
+    return `\n${label}: ${arr.join(', ')}`;
+  };
+  
+  // == Build caption with HTML formatting ==
+  const title = sanitize(manga.title);
+  const description = manga.description 
+    ? manga.description.substring(0, 800) + (manga.description.length > 800 ? '...' : '')
+    : 'No description available';
+  
+  const caption = `<b>${title}</b>\n` +
+    `📖 ${description}\n\n` +
+    `🏷️ <b>Type:</b> ${manga.type || 'N/A'}\n` +
+    `🌐 <b>Language:</b> ${manga.language || 'N/A'}\n` +
+    `📊 <b>Status:</b> ${manga.status || 'N/A'}\n` +
+    `📅 <b>Year:</b> ${manga.year || 'N/A'}\n` +
+    `🔢 <b>Latest Chapter:</b> ${manga.latest_chapter || 'N/A'}` +
+    formatList(manga.genres, '🎭 <b>Genres</b>') +
+    formatList(manga.authors, '✍️ <b>Authors</b>') +
+    formatList(manga.artists, '🎨 <b>Artists</b>');
   
   console.log('📤 Sending manga info to Telegram...');
   const messageId = await telegramSendPhoto(caption, coverPath, coverPath);
