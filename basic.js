@@ -1,6 +1,6 @@
-// basic.js - ES Module | Sharp Optimization | Telegram | Split Zips
+// basic.js - ES Module | Sharp | Telegram | Split Zips | FIXED
 import fs from 'fs/promises';
-import { existsSync, mkdirSync, appendFileSync, statSync } from 'fs';
+import * as fsSync from 'fs'; // For sync methods: existsSync, statSync, etc.
 import path from 'path';
 import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
@@ -25,9 +25,9 @@ const WEBP_OPTIONS = {
 
 // == Telegram Config ==
 const TG_API = 'https://api.telegram.org/bot';
-const TG_DELAY_MS = 3000; // 3 seconds between sends
-const MAX_ZIP_SIZE_MB = 49;
-const TARGET_ZIP_SIZE_MB = 45; // Buffer for safety
+const TG_DELAY_MS = 3000;
+const MAX_ZIP_SIZE_BYTES = 49 * 1024 * 1024;
+const TARGET_ZIP_SIZE_BYTES = 45 * 1024 * 1024;
 
 // == Helpers ==
 function sanitize(str) {
@@ -48,26 +48,33 @@ async function optimizeWithSharp(inputPath) {
     return outputPath;
   } catch (error) {
     console.error(`\n⚠️  Sharp failed for ${path.basename(inputPath)}: ${error.message}`);
-    if (existsSync(outputPath)) await fs.unlink(outputPath).catch(() => {});
+    if (fsSync.existsSync(outputPath)) await fs.unlink(outputPath).catch(() => {});
     return inputPath;
   }
 }
 
-function getFolderSize(folderPath) {
+// == Async folder size calculator (FIXED) ==
+async function getFolderSize(folderPath) {
   let total = 0;
-  const walk = (dir) => {
-    const files = existsSync(dir) ? fs.readdirSync(dir) : [];
-    for (const file of files) {
-      const filePath = path.join(dir, file);
-      const stat = statSync(filePath);
-      if (stat.isDirectory()) {
-        walk(filePath);
-      } else {
-        total += stat.size;
+  
+  const walk = async (dir) => {
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          await walk(fullPath);
+        } else {
+          const stat = await fs.stat(fullPath);
+          total += stat.size;
+        }
       }
+    } catch (e) {
+      // Folder might not exist yet, skip
     }
   };
-  walk(folderPath);
+  
+  await walk(folderPath);
   return total;
 }
 
@@ -79,6 +86,7 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// == Telegram Helpers ==
 async function telegramSendPhoto(caption, photoPath, thumbPath) {
   if (!TG_BOT_TOKEN || !TG_CHAT_ID) return null;
   
@@ -90,7 +98,7 @@ async function telegramSendPhoto(caption, photoPath, thumbPath) {
   const photoBlob = await fs.readFile(photoPath);
   formData.append('photo', new Blob([photoBlob]), path.basename(photoPath));
   
-  if (thumbPath && existsSync(thumbPath)) {
+  if (thumbPath && fsSync.existsSync(thumbPath)) {
     const thumbBlob = await fs.readFile(thumbPath);
     formData.append('thumbnail', new Blob([thumbBlob]), path.basename(thumbPath));
   }
@@ -117,7 +125,7 @@ async function telegramSendDocument(filePath, caption, replyToMessageId, thumbPa
     formData.append('reply_to_message_id', replyToMessageId);
   }
   
-  if (thumbPath && existsSync(thumbPath)) {
+  if (thumbPath && fsSync.existsSync(thumbPath)) {
     formData.append('thumbnail', new Blob([await fs.readFile(thumbPath)]), path.basename(thumbPath));
   }
   
@@ -126,7 +134,6 @@ async function telegramSendDocument(filePath, caption, replyToMessageId, thumbPa
     body: formData
   });
   
-  // Delay between sends
   await new Promise(resolve => setTimeout(resolve, TG_DELAY_MS));
 }
 
@@ -159,7 +166,7 @@ async function createZipGroups(baseDir, chapters, mangaTitle) {
   let currentGroup = [];
   let currentSize = 0;
   
-  // Estimate size per chapter folder
+  // Estimate size per chapter folder (async)
   const chapterSizes = [];
   for (const chapter of chapters) {
     const chapterPadded = String(chapter.number).padStart(3, '0');
@@ -168,7 +175,7 @@ async function createZipGroups(baseDir, chapters, mangaTitle) {
       ? path.join(baseDir, `Chapter_${chapterPadded}_${safeChapterName}`)
       : path.join(baseDir, `Chapter_${chapterPadded}`);
     
-    const size = getFolderSize(chapterDir);
+    const size = await getFolderSize(chapterDir);
     chapterSizes.push({ chapter, dir: chapterDir, size });
   }
   
@@ -177,7 +184,7 @@ async function createZipGroups(baseDir, chapters, mangaTitle) {
     // Add buffer for zip overhead (~10%)
     const estimatedZipSize = item.size * 1.1;
     
-    if (currentSize + estimatedZipSize > TARGET_ZIP_SIZE_MB * 1024 * 1024 && currentGroup.length > 0) {
+    if (currentSize + estimatedZipSize > TARGET_ZIP_SIZE_BYTES && currentGroup.length > 0) {
       // Start new group
       groups.push(currentGroup);
       currentGroup = [item];
@@ -207,7 +214,7 @@ async function createZipGroups(baseDir, chapters, mangaTitle) {
     execSync(`cd "${baseDir}" && zip -rq "../${zipName}" ${filesToZip}`, { stdio: 'pipe' });
     
     const zipPath = path.join(__dirname, zipName);
-    const zipSize = statSync(zipPath).size;
+    const zipSize = fsSync.statSync(zipPath).size; // sync is fine here
     console.log(`   📦 ${zipName}: ${formatBytes(zipSize)}`);
     
     zipFiles.push({ path: zipPath, name: zipName, minChapter, maxChapter });
@@ -241,7 +248,9 @@ async function run() {
   
   // == Create Base Directory ==
   const baseDir = mangaTitle;
-  if (!existsSync(baseDir)) mkdirSync(baseDir, { recursive: true });
+  if (!fsSync.existsSync(baseDir)) {
+    await fs.mkdir(baseDir, { recursive: true });
+  }
   
   // == Download & Optimize Chapters ==
   for (const chapter of chapters) {
@@ -255,7 +264,9 @@ async function run() {
       ? path.join(baseDir, `Chapter_${chapterPadded}_${safeChapterName}`)
       : path.join(baseDir, `Chapter_${chapterPadded}`);
     
-    if (!existsSync(chapterDir)) mkdirSync(chapterDir, { recursive: true });
+    if (!fsSync.existsSync(chapterDir)) {
+      await fs.mkdir(chapterDir, { recursive: true });
+    }
     
     console.log(`⬇️  Chapter ${chapterNum}: ${chapterDir} (${pagesCount} pages)`);
     
@@ -280,7 +291,7 @@ async function run() {
         }
       } catch (error) {
         console.error(`\n❌ Failed: ${imageUrl}`);
-        if (existsSync(outputFile)) await fs.unlink(outputFile).catch(() => {});
+        if (fsSync.existsSync(outputFile)) await fs.unlink(outputFile).catch(() => {});
       }
     }
     console.log(' ✅ Done');
@@ -297,7 +308,7 @@ async function run() {
     
     // Send each zip as reply
     for (const zip of zipFiles) {
-      const caption = `📦 <b>${mangaTitle}</b>\nChapters ${zip.minChapter}-${zip.maxChapter}\n🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}\n📁 ${formatBytes(statSync(zip.path).size)}`;
+      const caption = `📦 <b>${mangaTitle}</b>\nChapters ${zip.minChapter}-${zip.maxChapter}\n🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}\n📁 ${formatBytes(fsSync.statSync(zip.path).size)}`;
       
       console.log(`📤 Sending ${zip.name} to Telegram...`);
       await telegramSendDocument(zip.path, caption, infoMessageId, coverPath);
@@ -309,10 +320,6 @@ async function run() {
     console.log('\n⚠️  Telegram not configured. Zips created locally:');
     zipFiles.forEach(z => console.log(`   - ${z.name}`));
   }
-  
-  // == Cleanup (optional) ==
-  // await fs.rm(baseDir, { recursive: true, force: true });
-  // zipFiles.forEach(z => fs.unlink(z.path).catch(() => {}));
 }
 
 // == Run ==
