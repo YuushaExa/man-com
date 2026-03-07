@@ -17,7 +17,7 @@ const TG_BOT_TOKEN = process.env.TG_BOT_TOKEN || '';
 const TG_CHAT_ID = process.env.TG_CHAT_ID || '';
 
 // Concurrency settings (env-overridable)
-const DOWNLOAD_CONCURRENCY = parseInt(process.env.DOWNLOAD_CONCURRENCY) || 8;
+const DOWNLOAD_CONCURRENCY = parseInt(process.env.DOWNLOAD_CONCURRENCY) || 4;
 const OPTIMIZE_CONCURRENCY = parseInt(process.env.OPTIMIZE_CONCURRENCY) || 4;
 
 // == Sharp WebP Settings ==
