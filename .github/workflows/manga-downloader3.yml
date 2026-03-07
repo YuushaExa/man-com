@@ -19,10 +19,26 @@ on:
 jobs:
   download-and-send:
     runs-on: ubuntu-latest
-    
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Update Status: Processing 🔴
+        run: |
+          echo '{"status": "Processing", "icon": "🔴", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > status.json
+          git add status.json
+          git commit -m "chore: status processing [skip ci]"
+          git push origin HEAD:${{ github.ref_name }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -40,17 +56,30 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
-          # Uses input if manual dispatch, otherwise defaults to 'data.json' and true
           node basic.js \
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}"
 
+      - name: Update Status: Ready 🟢
+        if: always()
+        run: |
+          if [ "${{ job.status }}" == "success" ]; then
+            echo '{"status": "Ready", "icon": "🟢", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > status.json
+            MSG="chore: status ready [skip ci]"
+          else
+            echo '{"status": "Failed", "icon": "❌", "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"}' > status.json
+            MSG="chore: status failed [skip ci]"
+          fi
+          git add status.json
+          git commit -m "$MSG"
+          git push origin HEAD:${{ github.ref_name }}
+
       - name: Summary
+        if: success()
         run: |
           echo "## ✅ Process Complete" >> $GITHUB_STEP_SUMMARY
           echo "- 📤 Files sent directly to Telegram" >> $GITHUB_STEP_SUMMARY
           echo "- 🗑️ No artifacts saved (Telegram delivery only)" >> $GITHUB_STEP_SUMMARY
-          # Check optimization flag safely for both push and dispatch events
           if [ "${{ github.event.inputs.optimize_images || true }}" = "true" ]; then
             echo "- 🎨 Optimization: Sharp WebP (quality: 75, effort: 4, ds suffix)" >> $GITHUB_STEP_SUMMARY
           fi
