@@ -51,109 +51,27 @@ jobs:
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}" 2>&1 | tee output.log
 
-      - name: Parse Summary, Merge Status & List
+      - name: Process Summary Output
+        run: node scripts/process-summary.js
+
+      - name: Cleanup downloaded files
         run: |
-          node << 'EOF'
-          const fs = require('fs');
+          rm -rf node_modules/
+          rm -f package-lock.json
+          rm -rf *_ds.zip
+          rm -rf *_cover.jpg
+          rm -rf Miren_no_Tonbo/
+          find . -type d -name "*_ds" -exec rm -rf {} + 2>/dev/null || true
+          rm -f output.log
 
-          const logContent = fs.readFileSync('output.log', 'utf8');
-
-          const durationMatch = logContent.match(/Duration:\s*([0-9.]+)\s*s/i);
-          const downloadsMatch = logContent.match(/Downloads:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
-          const optimMatch = logContent.match(/Optimizations:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
-          const mangaMatch = logContent.match(/Manga:\s*([^\s•]+)\s*•\s*Ch\.([0-9.]+)/i);
-          const outputMatch = logContent.match(/Total output:\s*([0-9.]+)\s*(MB|GB)/i);
-
-          const duration = durationMatch ? durationMatch[1] : '0';
-          const downloadsDone = downloadsMatch ? downloadsMatch[1] : '0';
-          const downloadsTotal = downloadsMatch ? downloadsMatch[2] : '0';
-          const optimDone = optimMatch ? optimMatch[1] : '0';
-          const optimTotal = optimMatch ? optimMatch[2] : '0';
-          const mangaName = mangaMatch ? mangaMatch[1].trim() : '';
-          const chapterNum = mangaMatch ? parseFloat(mangaMatch[2]) : 0;
-          const outputSize = outputMatch ? outputMatch[1] : '0';
-          const outputUnit = outputMatch ? outputMatch[2].toUpperCase() : 'MB';
-
-          console.log('Parsed: Duration=' + duration + 's, Downloads=' + downloadsDone + '/' + downloadsTotal + ', Manga=' + mangaName + ' Ch.' + chapterNum + ', Output=' + outputSize + outputUnit);
-
-          let status = {
-            total_downloads: 0,
-            total_duration: 0,
-            total_output_mb: 0,
-            total_chapters: 0,
-            last_run: null,
-            status: "Ready",
-            icon: "🟢"
-          };
-
-          if (fs.existsSync('status.json')) {
-            try {
-              const existing = JSON.parse(fs.readFileSync('status.json', 'utf8'));
-              status = { ...status, ...existing };
-            } catch (e) { console.warn('Could not parse existing status.json:', e.message); }
-          }
-
-          status.total_downloads = (status.total_downloads || 0) + parseInt(downloadsDone);
-          status.total_duration = parseFloat((status.total_duration || 0) + parseFloat(duration)).toFixed(1);
-          
-          const sizeInMB = outputUnit === 'GB' ? parseFloat(outputSize) * 1024 : parseFloat(outputSize);
-          status.total_output_mb = parseFloat((status.total_output_mb || 0) + sizeInMB).toFixed(2);
-
-          if (chapterNum > 0) {
-            status.total_chapters = (status.total_chapters || 0) + chapterNum;
-          }
-
-          status.last_run = new Date().toISOString();
-          status.timestamp = status.last_run;
-
-          fs.writeFileSync('status.json', JSON.stringify(status, null, 2) + '\n');
-          console.log('✅ status.json merged');
-
-          let mangaList = [];
-          if (fs.existsSync('list.json')) {
-            try {
-              const existing = JSON.parse(fs.readFileSync('list.json', 'utf8'));
-              mangaList = Array.isArray(existing) ? existing : (existing.items || []);
-            } catch (e) { console.warn('Could not parse existing list.json:', e.message); }
-          }
-
-          if (mangaName && chapterNum > 0) {
-            const existingIndex = mangaList.findIndex(item => item.name === mangaName);
-            
-            if (existingIndex !== -1) {
-              mangaList[existingIndex] = { name: mangaName, chapter: chapterNum };
-              console.log('✅ Updated "' + mangaName + '" to chapter ' + chapterNum);
-            } else {
-              mangaList.push({ name: mangaName, chapter: chapterNum });
-              console.log('✅ Added "' + mangaName + '" chapter ' + chapterNum);
-            }
-            
-            fs.writeFileSync('list.json', JSON.stringify({ items: mangaList }, null, 2) + '\n');
-          }
-
-          const summary = [
-            '## ✅ Process Complete',
-            '- 📤 Files sent directly to Telegram',
-            '- 🗑️ No artifacts saved (Telegram delivery only)',
-            '',
-            '### 📊 This Run',
-            '```',
-            '⏱️ Duration: ' + duration + 's',
-            '📥 Downloads: ' + downloadsDone + '/' + downloadsTotal,
-            '🎨 Optimizations: ' + optimDone + '/' + optimTotal,
-            '🔗 Manga: ' + mangaName + ' • Ch.' + chapterNum,
-            '📦 Output: ' + outputSize + ' ' + outputUnit,
-            '```',
-            '',
-            '### 📈 Cumulative Totals',
-            '```',
-            'Total Downloads: ' + status.total_downloads,
-            'Total Duration: ' + status.total_duration + 's',
-            'Total Output: ' + status.total_output_mb + ' MB',
-            'Total Chapters: ' + status.total_chapters,
-            '```'
-          ].join('\n');
-
-          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary + '\n');
-          console.log('✅ Summary written');
-          EOF
+      - name: Commit Merged Status & List
+        if: always()
+        run: |
+          git add status.json list.json 2>/dev/null || git add status.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: merge status + update manga list [skip ci]" || true
+            git pull --rebase origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }} || true
+          else
+            echo "ℹ️ No changes to commit"
+          fi
