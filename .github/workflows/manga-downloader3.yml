@@ -46,88 +46,39 @@ jobs:
           npm install
 
       - name: Run downloader + Telegram sender
-        id: downloader
-        env:
-          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
-          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           node basic.js \
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}" 2>&1 | tee output.log
 
-      - name: Parse Summary & Merge Status
-        id: summary
+      - name: Parse Summary, Merge Status & List
         run: |
           node << 'EOF'
           const fs = require('fs');
 
           // Read output.log
           const logContent = fs.readFileSync('output.log', 'utf8');
-          const lines = logContent.split('\n');
 
-          // Parse values using flexible regex
-          let duration = '0';
-          let downloadsDone = '0';
-          let downloadsTotal = '0';
-          let optimDone = '0';
-          let optimTotal = '0';
-          let mangaName = '';
-          let chapterNum = '0';
-          let outputSize = '0';
-          let outputUnit = 'MB';
+          // Parse values from the Summary section
+          const durationMatch = logContent.match(/Duration:\s*([0-9.]+)\s*s/i);
+          const downloadsMatch = logContent.match(/Downloads:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
+          const optimMatch = logContent.match(/Optimizations:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
+          const mangaMatch = logContent.match(/Manga:\s*([^\s•]+)\s*•\s*Ch\.([0-9.]+)/i);
+          const outputMatch = logContent.match(/Total output:\s*([0-9.]+)\s*(MB|GB)/i);
 
-          for (const line of lines) {
-            // Duration: ⏱️ Duration: 35.7s
-            const durationMatch = line.match(/Duration:\s*([0-9.]+)\s*s/i);
-            if (durationMatch) duration = durationMatch[1];
-
-            // Downloads: 📥 Downloads: 82/82
-            const downloadsMatch = line.match(/Downloads:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
-            if (downloadsMatch) {
-              downloadsDone = downloadsMatch[1];
-              downloadsTotal = downloadsMatch[2];
-            }
-
-            // Optimizations: 🎨 Optimizations: 82/82
-            const optimMatch = line.match(/Optimizations:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
-            if (optimMatch) {
-              optimDone = optimMatch[1];
-              optimTotal = optimMatch[2];
-            }
-
-            // Manga: 🔗 Manga: xkqm7 • Ch.?
-            const mangaMatch = line.match(/Manga:\s*([^\s•]+)\s*•\s*Ch\.([0-9.]+|\?)/i);
-            if (mangaMatch) {
-              mangaName = mangaMatch[1].trim();
-              chapterNum = mangaMatch[2] === '?' ? '0' : mangaMatch[2];
-            }
-
-            // Output: 📦 Total output: 13.38 MB
-            const outputMatch = line.match(/Total output:\s*([0-9.]+)\s*(MB|GB)/i);
-            if (outputMatch) {
-              outputSize = outputMatch[1];
-              outputUnit = outputMatch[2].toUpperCase();
-            }
-          }
-
-          // Write to GITHUB_OUTPUT
-          const output = [
-            `duration=${duration}`,
-            `downloads_done=${downloadsDone}`,
-            `downloads_total=${downloadsTotal}`,
-            `optim_done=${optimDone}`,
-            `optim_total=${optimTotal}`,
-            `manga_name=${mangaName}`,
-            `chapter_num=${chapterNum}`,
-            `output_size=${outputSize}`,
-            `output_unit=${outputUnit}`
-          ].join('\n');
-
-          fs.appendFileSync(process.env.GITHUB_OUTPUT, output + '\n');
+          const duration = durationMatch ? durationMatch[1] : '0';
+          const downloadsDone = downloadsMatch ? downloadsMatch[1] : '0';
+          const downloadsTotal = downloadsMatch ? downloadsMatch[2] : '0';
+          const optimDone = optimMatch ? optimMatch[1] : '0';
+          const optimTotal = optimMatch ? optimMatch[2] : '0';
+          const mangaName = mangaMatch ? mangaMatch[1].trim() : '';
+          const chapterNum = mangaMatch ? parseFloat(mangaMatch[2]) : 0;
+          const outputSize = outputMatch ? outputMatch[1] : '0';
+          const outputUnit = outputMatch ? outputMatch[2].toUpperCase() : 'MB';
 
           console.log(`Parsed: Duration=${duration}s, Downloads=${downloadsDone}/${downloadsTotal}, Manga=${mangaName} Ch.${chapterNum}, Output=${outputSize}${outputUnit}`);
 
-          // === MERGE status.json (cumulative totals ONLY) ===
+          // === MERGE status.json ===
           let status = {
             total_downloads: 0,
             total_duration: 0,
@@ -145,28 +96,23 @@ jobs:
             } catch (e) { console.warn('Could not parse existing status.json:', e.message); }
           }
 
-          // Merge cumulative values
           status.total_downloads = (status.total_downloads || 0) + parseInt(downloadsDone);
           status.total_duration = parseFloat((status.total_duration || 0) + parseFloat(duration)).toFixed(1);
           
-          // Convert output to MB for consistent accumulation
           const sizeInMB = outputUnit === 'GB' ? parseFloat(outputSize) * 1024 : parseFloat(outputSize);
           status.total_output_mb = parseFloat((status.total_output_mb || 0) + sizeInMB).toFixed(2);
 
-          // Add this run's chapter to the cumulative total (as a number)
-          const chapNum = parseFloat(chapterNum);
-          if (chapNum > 0) {
-            status.total_chapters = (status.total_chapters || 0) + chapNum;
+          if (chapterNum > 0) {
+            status.total_chapters = (status.total_chapters || 0) + chapterNum;
           }
 
           status.last_run = new Date().toISOString();
           status.timestamp = status.last_run;
 
-          // Write merged status.json
           fs.writeFileSync('status.json', JSON.stringify(status, null, 2) + '\n');
           console.log('✅ status.json merged');
 
-          // === UPDATE list.json (structured objects, numeric chapters, replace on duplicate) ===
+          // === UPDATE list.json ===
           let mangaList = [];
           if (fs.existsSync('list.json')) {
             try {
@@ -175,23 +121,45 @@ jobs:
             } catch (e) { console.warn('Could not parse existing list.json:', e.message); }
           }
 
-          if (mangaName && chapNum > 0) {
+          if (mangaName && chapterNum > 0) {
             const existingIndex = mangaList.findIndex(item => item.name === mangaName);
             
             if (existingIndex !== -1) {
-              // Replace existing entry with new chapter number
-              mangaList[existingIndex] = { name: mangaName, chapter: chapNum };
-              console.log(`✅ Updated "${mangaName}" to chapter ${chapNum} in list.json`);
+              mangaList[existingIndex] = { name: mangaName, chapter: chapterNum };
+              console.log(`✅ Updated "${mangaName}" to chapter ${chapterNum}`);
             } else {
-              // Add new entry
-              mangaList.push({ name: mangaName, chapter: chapNum });
-              console.log(`✅ Added { name: "${mangaName}", chapter: ${chapNum} } to list.json`);
+              mangaList.push({ name: mangaName, chapter: chapterNum });
+              console.log(`✅ Added "${mangaName}" chapter ${chapterNum}`);
             }
             
             fs.writeFileSync('list.json', JSON.stringify({ items: mangaList }, null, 2) + '\n');
-          } else if (mangaName) {
-            console.log(`ℹ️ Manga "${mangaName}" has unknown chapter (?), skipping list.json update`);
           }
+
+          // === WRITE GITHUB_STEP_SUMMARY ===
+          const summary = `## ✅ Process Complete
+- 📤 Files sent directly to Telegram
+- 🗑️ No artifacts saved (Telegram delivery only)
+
+### 📊 This Run
+\`\`\`
+⏱️ Duration: ${duration}s
+📥 Downloads: ${downloadsDone}/${downloadsTotal}
+🎨 Optimizations: ${optimDone}/${optimTotal}
+🔗 Manga: ${mangaName} • Ch.${chapterNum}
+📦 Output: ${outputSize} ${outputUnit}
+\`\`\`
+
+### 📈 Cumulative Totals
+\`\`\`
+Total Downloads: ${status.total_downloads}
+Total Duration: ${status.total_duration}s
+Total Output: ${status.total_output_mb} MB
+Total Chapters: ${status.total_chapters}
+\`\`\`
+`;
+
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
+          console.log('✅ Summary written');
           EOF
 
       - name: Cleanup downloaded files
@@ -216,24 +184,3 @@ jobs:
           else
             echo "ℹ️ No changes to commit"
           fi
-          
-      - name: Summary
-        if: success()
-        run: |
-          echo "## ✅ Process Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- 📤 Files sent directly to Telegram" >> $GITHUB_STEP_SUMMARY
-          echo "- 🗑️ No artifacts saved (Telegram delivery only)" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📊 This Run" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "⏱️ Duration: ${{ steps.summary.outputs.duration }}s" >> $GITHUB_STEP_SUMMARY
-          echo "📥 Downloads: ${{ steps.summary.outputs.downloads_done }}/${{ steps.summary.outputs.downloads_total }}" >> $GITHUB_STEP_SUMMARY
-          echo "🎨 Optimizations: ${{ steps.summary.outputs.optim_done }}/${{ steps.summary.outputs.optim_total }}" >> $GITHUB_STEP_SUMMARY
-          echo "🔗 Manga: ${{ steps.summary.outputs.manga_name }} • Ch.${{ steps.summary.outputs.chapter_num }}" >> $GITHUB_STEP_SUMMARY
-          echo "📦 Output: ${{ steps.summary.outputs.output_size }} ${{ steps.summary.outputs.output_unit }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📈 Cumulative Totals" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat status.json | node -e "const s=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(\`Total Downloads: \${s.total_downloads}\nTotal Duration: \${s.total_duration}s\nTotal Output: \${s.total_output_mb} MB\nTotal Chapters: \${s.total_chapters}\`)" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
