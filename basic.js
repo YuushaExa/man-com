@@ -37,14 +37,25 @@ const TARGET_ZIP_SIZE_BYTES = 45 * 1024 * 1024;
 const logs = {
   downloads: { success: 0, failed: [] },
   optimizations: { success: 0, failed: [] },
-  chapters: { success: 0, failed: [] }
+  chapters: { success: 0, failed: [] },
+  telegram: { success: 0, failed: [] } 
 };
 
 // == Helpers ==
 function sanitize(str) {
   return (str || '').toString().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
-
+// ✅ Extract manga ID from URL: /title/grljk-asklepios → grljk
+function extractMangaId(url) {
+  if (!url) return 'N/A';
+  try {
+    // Match pattern: /title/XXXX-anything or /title/XXXX
+    const match = url.trim().match(/\/title\/([^-\s\/]+)/);
+    return match ? match[1] : 'N/A';
+  } catch {
+    return 'N/A';
+  }
+}
 function getOptimizedFilename(originalPath) {
   const dir = path.dirname(originalPath);
   const base = path.basename(originalPath, '.webp');
@@ -119,55 +130,104 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
+// ✅ Calculate total size of zip files
+async function calculateTotalSize(zipFiles) {
+  let total = 0;
+  for (const zip of zipFiles) {
+    try {
+      const stat = await fs.stat(zip.path);
+      total += stat.size;
+    } catch (e) {
+      console.warn(`⚠️  Could not stat ${zip.path}: ${e.message}`);
+    }
+  }
+  return total;
+}
+
 // == Telegram Helpers ==
 async function telegramSendPhoto(caption, photoPath, thumbPath) {
   if (!TG_BOT_TOKEN || !TG_CHAT_ID) return null;
   
-  const formData = new FormData();
-  formData.append('chat_id', TG_CHAT_ID);
-  formData.append('caption', caption);
-  formData.append('parse_mode', 'HTML');
-  
-  const photoBlob = await fs.readFile(photoPath);
-  formData.append('photo', new Blob([photoBlob]), path.basename(photoPath));
-  
-  if (thumbPath && fsSync.existsSync(thumbPath)) {
-    const thumbBlob = await fs.readFile(thumbPath);
-    formData.append('thumbnail', new Blob([thumbBlob]), path.basename(thumbPath));
+  try {
+    const formData = new FormData();
+    formData.append('chat_id', TG_CHAT_ID);
+    formData.append('caption', caption);
+    formData.append('parse_mode', 'HTML');
+    
+    const photoBlob = await fs.readFile(photoPath);
+    formData.append('photo', new Blob([photoBlob]), path.basename(photoPath));
+    
+    if (thumbPath && fsSync.existsSync(thumbPath)) {
+      const thumbBlob = await fs.readFile(thumbPath);
+      formData.append('thumbnail', new Blob([thumbBlob]), path.basename(thumbPath));
+    }
+    
+    const response = await fetch(`${TG_API}${TG_BOT_TOKEN}/sendPhoto`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'No error body');
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+    
+    const result = await response.json();
+    logs.telegram.success++;
+    return result.ok ? result.result.message_id : null;
+    
+  } catch (error) {
+    logs.telegram.failed.push({
+      timestamp: new Date().toISOString(),
+      action: 'sendPhoto',
+      photo: path.basename(photoPath),
+      error: error.message
+    });
+    console.error(`❌ [TELEGRAM] Failed to send photo: ${error.message}`);
+    return null;
   }
-  
-  const response = await fetch(`${TG_API}${TG_BOT_TOKEN}/sendPhoto`, {
-    method: 'POST',
-    body: formData
-  });
-  
-  const result = await response.json();
-  return result.ok ? result.result.message_id : null;
 }
 
 async function telegramSendDocument(filePath, caption, replyToMessageId, thumbPath) {
   if (!TG_BOT_TOKEN || !TG_CHAT_ID) return;
   
-  const formData = new FormData();
-  formData.append('chat_id', TG_CHAT_ID);
-  formData.append('document', new Blob([await fs.readFile(filePath)]), path.basename(filePath));
-  formData.append('caption', caption);
-  formData.append('parse_mode', 'HTML');
-  
-  if (replyToMessageId) {
-    formData.append('reply_to_message_id', replyToMessageId);
+  try {
+    const formData = new FormData();
+    formData.append('chat_id', TG_CHAT_ID);
+    formData.append('document', new Blob([await fs.readFile(filePath)]), path.basename(filePath));
+    formData.append('caption', caption);
+    formData.append('parse_mode', 'HTML');
+    
+    if (replyToMessageId) {
+      formData.append('reply_to_message_id', replyToMessageId);
+    }
+    
+    if (thumbPath && fsSync.existsSync(thumbPath)) {
+      formData.append('thumbnail', new Blob([await fs.readFile(thumbPath)]), path.basename(thumbPath));
+    }
+    
+    const response = await fetch(`${TG_API}${TG_BOT_TOKEN}/sendDocument`, {
+      method: 'POST',
+      body: formData
+    });
+    
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => 'No error body');
+      throw new Error(`HTTP ${response.status}: ${errorText}`);
+    }
+    
+    logs.telegram.success++;
+    await new Promise(resolve => setTimeout(resolve, TG_DELAY_MS));
+    
+  } catch (error) {
+    logs.telegram.failed.push({
+      timestamp: new Date().toISOString(),
+      action: 'sendDocument',
+      file: path.basename(filePath),
+      error: error.message
+    });
+    console.error(`❌ [TELEGRAM] Failed to send document ${path.basename(filePath)}: ${error.message}`);
   }
-  
-  if (thumbPath && fsSync.existsSync(thumbPath)) {
-    formData.append('thumbnail', new Blob([await fs.readFile(thumbPath)]), path.basename(thumbPath));
-  }
-  
-  await fetch(`${TG_API}${TG_BOT_TOKEN}/sendDocument`, {
-    method: 'POST',
-    body: formData
-  });
-  
-  await new Promise(resolve => setTimeout(resolve, TG_DELAY_MS));
 }
 
 async function sendMangaInfo(manga, coverPath) {
@@ -186,8 +246,14 @@ async function sendMangaInfo(manga, coverPath) {
     ? manga.description.substring(0, 800) + (manga.description.length > 800 ? '...' : '')
     : 'No description available';
   
+  // ✅ Add URL field to caption with HTML link
+  const urlField = manga.url 
+    ? `\n🔗 <b>URL:</b> <a href="${manga.url}">${manga.url}</a>` 
+    : '';
+  
   const caption = `<b>${title}</b>\n` +
     `${description}\n` +
+    `${urlField}\n` +  // ✅ Insert URL here
     `🏷️ <b>Type:</b> ${manga.type || 'N/A'}\n` +
     `🌐 <b>Language:</b> ${manga.language || 'N/A'}\n` +
     `📊 <b>Status:</b> ${manga.status || 'N/A'}\n` +
@@ -247,7 +313,6 @@ async function createZipGroups(baseDir, chapters, mangaTitle) {
     const minChapter = group[0].chapter.number;
     const maxChapter = group[group.length - 1].chapter.number;
     
-    // ✅ Single chapter: ch6 | Range: ch1-3
     const chapterRange = minChapter === maxChapter 
       ? `ch${minChapter}` 
       : `ch${minChapter}-${maxChapter}`;
@@ -376,7 +441,7 @@ async function processChapter(chapter, baseDir) {
 }
 
 // == Print final summary ==
-function printSummary(startTime) {
+function printSummary(startTime, zipFiles = []) {
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   
   console.log('\n' + '═'.repeat(60));
@@ -411,9 +476,31 @@ function printSummary(startTime) {
     }
   }
   
+  // ✅ Telegram summary
+  if (logs.telegram.success > 0 || logs.telegram.failed.length > 0) {
+    console.log(`📤 Telegram: ${logs.telegram.success} sent, ${logs.telegram.failed.length} failed`);
+    if (logs.telegram.failed.length > 0) {
+      logs.telegram.failed.slice(0, 5).forEach(f => {
+        console.log(`   ❌ ${f.action}(${f.file || f.photo}): ${f.error}`);
+      });
+      if (logs.telegram.failed.length > 5) {
+        console.log(`   ...and ${logs.telegram.failed.length - 5} more`);
+      }
+    }
+  }
+  
+  // ✅ Total output size
+  if (zipFiles.length > 0) {
+    const totalZipSize = zipFiles.reduce((sum, z) => {
+      try { return sum + fsSync.statSync(z.path).size; } catch { return sum; }
+    }, 0);
+    console.log(`📦 Total output size: ${formatBytes(totalZipSize)}`);
+  }
+  
   console.log(`⏱️  Total time: ${duration}s`);
   console.log('═'.repeat(60));
   
+  // ✅ GitHub Actions summary
   if (process.env.GITHUB_STEP_SUMMARY) {
     let summary = `## 📊 Summary\n`;
     summary += `- ⏱️ Duration: ${duration}s\n`;
@@ -421,10 +508,49 @@ function printSummary(startTime) {
     if (OPTIMIZE) {
       summary += `- 🎨 Optimizations: ${logs.optimizations.success}/${logs.optimizations.success + logs.optimizations.failed.length}\n`;
     }
-    const totalErrors = logs.downloads.failed.length + logs.optimizations.failed.length;
-    if (totalErrors > 0) {
-      summary += `- ⚠️ Errors: ${totalErrors} (check logs)\n`;
+    
+    // ✅ Add Telegram stats to GH summary
+    if (logs.telegram.success > 0 || logs.telegram.failed.length > 0) {
+      summary += `- 📤 Telegram: ${logs.telegram.success} sent`;
+      if (logs.telegram.failed.length > 0) summary += `, ❌ ${logs.telegram.failed.length} failed`;
+      summary += `\n`;
     }
+    
+    // ✅ Add total size to GH summary
+    if (zipFiles.length > 0) {
+      const totalZipSize = zipFiles.reduce((sum, z) => {
+        try { return sum + fsSync.statSync(z.path).size; } catch { return sum; }
+      }, 0);
+      summary += `- 📦 Total output: ${formatBytes(totalZipSize)}\n`;
+    }
+    
+    const totalErrors = logs.downloads.failed.length + logs.optimizations.failed.length + logs.telegram.failed.length;
+    if (totalErrors > 0) {
+      summary += `- ⚠️ Total errors: ${totalErrors} (check logs)\n`;
+    }
+    
+    // ✅ Append failed downloads to GH summary for visibility
+    if (logs.downloads.failed.length > 0) {
+      summary += `\n### ❌ Failed Downloads\n`;
+      logs.downloads.failed.slice(0, 10).forEach(f => {
+        summary += `- Ch${f.context.chapter}/Pg${f.context.page}: ${f.error}\n`;
+      });
+      if (logs.downloads.failed.length > 10) {
+        summary += `- ...and ${logs.downloads.failed.length - 10} more\n`;
+      }
+    }
+    
+    // ✅ Append Telegram failures to GH summary
+    if (logs.telegram.failed.length > 0) {
+      summary += `\n### ❌ Telegram Send Failures\n`;
+      logs.telegram.failed.slice(0, 10).forEach(f => {
+        summary += `- ${f.action}(${f.file || f.photo}): ${f.error}\n`;
+      });
+      if (logs.telegram.failed.length > 10) {
+        summary += `- ...and ${logs.telegram.failed.length - 10} more\n`;
+      }
+    }
+    
     fsSync.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
   }
 }
@@ -478,20 +604,24 @@ async function run() {
   if (TG_BOT_TOKEN && TG_CHAT_ID) {
     infoMessageId = await sendMangaInfo(manga, coverPath);
     
+    // ✅ Calculate total size for summary captions
+    const totalSize = await calculateTotalSize(zipFiles);
+    const mangaId = extractMangaId(manga.url);
+
     for (let i = 0; i < zipFiles.length; i++) {
       const zip = zipFiles[i];
       const current = i + 1;
       const total = zipFiles.length;
       
-      // ✅ Single chapter vs range display in caption
       const chapterRange = zip.minChapter === zip.maxChapter 
         ? `${zip.minChapter}` 
         : `${zip.minChapter}-${zip.maxChapter}`;
       
+      // ✅ Add total size + current zip size to caption
       const caption = `📦 <b>${mangaTitle}</b>\n` +
         `Chapters ${chapterRange}\n` +
         `🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}, ${current}/${total}\n` +
-        `📁 ${formatBytes(fsSync.statSync(zip.path).size)}`;
+        `📊 Total: ${formatBytes(totalSize)} | This: ${formatBytes(fsSync.statSync(zip.path).size)}`;
       
       console.log(`📤 Sending ${zip.name} to Telegram...`);
       await telegramSendDocument(zip.path, caption, infoMessageId, coverPath);
@@ -505,12 +635,12 @@ async function run() {
   }
   
   // == Print Summary ==
-  printSummary(startTime);
+  printSummary(startTime, zipFiles);
 }
 
 // == Run ==
 run().catch(error => {
   console.error('💥 Fatal error:', error);
-  printSummary(Date.now());
+  printSummary(Date.now(), []);
   process.exit(1);
 });
