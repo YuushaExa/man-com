@@ -46,13 +46,102 @@ jobs:
           npm install
 
       - name: Run downloader + Telegram sender
+        id: downloader
+        env:
+          TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           node basic.js \
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}" 2>&1 | tee output.log
 
-      - name: Process Summary Output
-        run: node scripts/process-summary.js
+      - name: Parse Summary
+        id: summary
+        run: |
+          # Parse the new summary format from output.log
+          DURATION=$(grep -oP '⏱️ Duration: \K[0-9.]+' output.log | head -1 || echo "0")
+          # Get successful downloads (first number in X/Y format)
+          DOWNLOADS=$(grep -oP '📥 Downloads: \K[0-9]+' output.log | head -1 || echo "0")
+          MANGA_ID=$(grep -oP '🔗 Manga: \K[a-zA-Z0-9_-]+' output.log | head -1 || echo "")
+          CHAPTER=$(grep -oP '🔗 Manga: .* • Ch\.\K[0-9]+' output.log | head -1 || echo "0")
+          TOTAL_OUTPUT=$(grep -oP '📦 Total output: \K[0-9.]+' output.log | head -1 || echo "0")
+          
+          # Fallback defaults
+          : "${DURATION:=0}"; : "${DOWNLOADS:=0}"; : "${CHAPTER:=0}"; : "${TOTAL_OUTPUT:=0}"
+          
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          echo "downloads=$DOWNLOADS" >> $GITHUB_OUTPUT
+          echo "manga_id=$MANGA_ID" >> $GITHUB_OUTPUT
+          echo "chapter=$CHAPTER" >> $GITHUB_OUTPUT
+          echo "total_output=$TOTAL_OUTPUT" >> $GITHUB_OUTPUT
+
+      - name: Merge status.json and list.json
+        run: |
+          node << 'EOF'
+            const fs = require('fs');
+            
+            // === Update status.json (cumulative stats) ===
+            let status = {};
+            if (fs.existsSync('status.json')) {
+              try {
+                status = JSON.parse(fs.readFileSync('status.json', 'utf8'));
+              } catch (e) {
+                console.log('⚠️ Could not parse status.json, starting fresh');
+              }
+            }
+            
+            const newDownloads = parseFloat('${{ steps.summary.outputs.downloads }}') || 0;
+            const newDuration = parseFloat('${{ steps.summary.outputs.duration }}') || 0;
+            const newOutput = parseFloat('${{ steps.summary.outputs.total_output }}') || 0;
+            const newChapter = parseInt('${{ steps.summary.outputs.chapter }}') || 0;
+            
+            // Merge cumulative values
+            status.total_downloads = (status.total_downloads || 0) + newDownloads;
+            status.total_duration = (status.total_duration || 0) + newDuration;
+            status.total_output = (status.total_output || 0) + newOutput;
+            // Latest chapter: just store the number (not cumulative)
+            status.latest_chapter = newChapter;
+            status.last_updated = new Date().toISOString();
+            
+            fs.writeFileSync('status.json', JSON.stringify(status, null, 2));
+            console.log('✅ Updated status.json');
+            
+            // === Update list.json (manga: highest chapter) ===
+            let list = {};
+            if (fs.existsSync('list.json')) {
+              try {
+                list = JSON.parse(fs.readFileSync('list.json', 'utf8'));
+              } catch (e) {
+                console.log('⚠️ Could not parse list.json, starting fresh');
+              }
+            }
+            
+            const mangaId = '${{ steps.summary.outputs.manga_id }}';
+            const chapter = parseInt('${{ steps.summary.outputs.chapter }}');
+            
+            if (mangaId && chapter) {
+              // Only update if chapter is higher than stored (deduplication)
+              if (!list[mangaId] || list[mangaId] < chapter) {
+                list[mangaId] = chapter;
+                console.log(`📝 Updated ${mangaId} → chapter ${chapter}`);
+              } else {
+                console.log(`ℹ️ ${mangaId} already at ${list[mangaId]}, skipping`);
+              }
+            }
+            
+            fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
+            console.log('✅ Updated list.json');
+          EOF
+          
+          # Commit changes only if files were modified
+          git add status.json list.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: merge stats + update chapters [skip ci]" || true
+            git pull --rebase origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }} || true
+          else
+            echo "ℹ️ No changes to commit"
+          fi
 
       - name: Cleanup downloaded files
         run: |
@@ -64,14 +153,23 @@ jobs:
           find . -type d -name "*_ds" -exec rm -rf {} + 2>/dev/null || true
           rm -f output.log
 
-      - name: Commit Merged Status & List
-        if: always()
+      - name: Summary
+        if: success()
         run: |
-          git add status.json list.json 2>/dev/null || git add status.json
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: merge status + update manga list [skip ci]" || true
-            git pull --rebase origin ${{ github.ref_name }} || true
-            git push origin HEAD:${{ github.ref_name }} || true
-          else
-            echo "ℹ️ No changes to commit"
-          fi
+          echo "## ✅ Process Complete" >> $GITHUB_STEP_SUMMARY
+          echo "- 📤 Files sent directly to Telegram" >> $GITHUB_STEP_SUMMARY
+          echo "- 🗑️ No artifacts saved (Telegram delivery only)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 This Run Summary" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "⏱️ Duration: ${{ steps.summary.outputs.duration }}s" >> $GITHUB_STEP_SUMMARY
+          echo "📥 Downloads: ${{ steps.summary.outputs.downloads }}" >> $GITHUB_STEP_SUMMARY
+          echo "🎨 Optimizations: ${{ steps.summary.outputs.downloads }}" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Output: ${{ steps.summary.outputs.total_output }} MB" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 Manga: ${{ steps.summary.outputs.manga_id }} • Ch.${{ steps.summary.outputs.chapter }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📈 Cumulative Stats (status.json)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat status.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
