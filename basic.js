@@ -441,7 +441,7 @@ async function processChapter(chapter, baseDir) {
 }
 
 // == Print final summary ==
-function printSummary(startTime, zipFiles = []) {
+function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A') {
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   
   console.log('\n' + '═'.repeat(60));
@@ -466,7 +466,8 @@ function printSummary(startTime, zipFiles = []) {
       console.log(`      ...and ${logs.downloads.failed.length - 5} more`);
     }
   }
-  
+      summary += `ID: <code>${mangaId}</code>, Ch:<code>${latestCh}</code>\n`;
+
   if (OPTIMIZE) {
     const totalOpt = logs.optimizations.success + logs.optimizations.failed.length;
     console.log(`🎨 Optimizations: ${logs.optimizations.success}/${totalOpt} succeeded`);
