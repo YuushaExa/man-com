@@ -1,10 +1,13 @@
 {
-  "total_downloads": 390,
-  "total_duration": "0.0",
+  "total_downloads": 544,
+  "total_duration": "0.00",
   "total_output_mb": "0.00",
   "total_chapters": 0,
   "last_run": "2026-03-08T23:48:52.828Z",
   "status": "Ready",
   "icon": "🟢",
-  "timestamp": "2026-03-08T23:48:52.828Z"
+  "timestamp": "2026-03-08T23:48:52.828Z",
+  "total_output": 0,
+  "latest_chapter": 0,
+  "last_updated": "2026-03-08T23:59:48.490Z"
 }
