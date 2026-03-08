@@ -1,4 +1,4 @@
-// basic.js - ES Module | Parallel | Sharp | Telegram | Split Zips | Logging
+// basic.js - ES Module | Parallel | Sharp | Telegram | Split Zips | Logging | Optimized
 import fs from 'fs/promises';
 import * as fsSync from 'fs';
 import path from 'path';
@@ -187,7 +187,7 @@ async function sendMangaInfo(manga, coverPath) {
     : 'No description available';
   
   const caption = `<b>${title}</b>\n` +
-    `${description}\n` +
+    `📖 ${description}\n\n` +
     `🏷️ <b>Type:</b> ${manga.type || 'N/A'}\n` +
     `🌐 <b>Language:</b> ${manga.language || 'N/A'}\n` +
     `📊 <b>Status:</b> ${manga.status || 'N/A'}\n` +
@@ -195,7 +195,8 @@ async function sendMangaInfo(manga, coverPath) {
     `🔢 <b>Latest Chapter:</b> ${manga.latest_chapter || 'N/A'}` +
     formatList(manga.genres, '🎭 <b>Genres</b>') +
     formatList(manga.authors, '✍️ <b>Authors</b>') +
-    formatList(manga.artists, '🎨 <b>Artists</b>');
+    formatList(manga.artists, '🎨 <b>Artists</b>') +
+    (manga.url ? `\n🔗 <a href="${manga.url}">Source</a>` : '');
   
   console.log('📤 Sending manga info to Telegram...');
   const messageId = await telegramSendPhoto(caption, coverPath, coverPath);
@@ -274,19 +275,15 @@ async function createZipGroups(baseDir, chapters, mangaTitle) {
   return zipFiles;
 }
 
-// == Download single image with curl ==
+// == Download single image with curl (SIMPLIFIED FOR SPEED) ==
 async function downloadImage(imageUrl, outputFile) {
   const curlCmd = `curl -sL \
     -H "Referer: https://comix.to/" \
-    -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36" \
-    --compressed \
-    --keepalive-time 10 \
+    -H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64)" \
     "${imageUrl}" \
     -o "${outputFile}" \
-    --retry 2 \
-    --connect-timeout 20 \
-    --speed-time 30 \
-    --speed-limit 1000`;
+    --retry 1 \
+    --connect-timeout 15`;
   
   execSync(curlCmd, { stdio: 'ignore' });
 }
@@ -309,6 +306,7 @@ async function processChapter(chapter, baseDir) {
   console.log(`⬇️  Chapter ${chapterNum}: ${chapterDir} (${chapter.pages_count} pages)`);
   
   const downloadLimit = pLimit(DOWNLOAD_CONCURRENCY);
+  const optimizeLimit = pLimit(OPTIMIZE_CONCURRENCY);
   const filesToOptimize = [];
   
   const downloadTasks = chapter.images.map((imageUrl, pageIndex) => {
@@ -351,8 +349,7 @@ async function processChapter(chapter, baseDir) {
   
   // == Parallel Optimization ==
   if (OPTIMIZE && filesToOptimize.length > 0) {
-    console.log(`\n🎨 Optimizing ${filesToOptimize.length} images (parallel)...`);
-    const optimizeLimit = pLimit(OPTIMIZE_CONCURRENCY);
+    console.log(`\n🎨 Optimizing ${filesToOptimize.length} images...`);
     
     const optimizeTasks = filesToOptimize.map(filePath => {
       return optimizeLimit(async () => {
@@ -378,13 +375,17 @@ async function processChapter(chapter, baseDir) {
 // == Print final summary ==
 function printSummary(startTime) {
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
+  const totalDownloads = logs.downloads.success + logs.downloads.failed.length;
+  const imagesPerSecond = totalDownloads > 0 
+    ? (totalDownloads / ((Date.now() - startTime) / 1000)).toFixed(2) 
+    : '0.00';
   
   console.log('\n' + '═'.repeat(60));
   console.log('📊 DOWNLOAD & OPTIMIZATION SUMMARY');
   console.log('═'.repeat(60));
-  
-  const totalDownloads = logs.downloads.success + logs.downloads.failed.length;
   console.log(`📥 Downloads: ${logs.downloads.success}/${totalDownloads} succeeded`);
+  console.log(`⚡ Speed: ${imagesPerSecond} images/sec`);
+  
   if (logs.downloads.failed.length > 0) {
     console.log(`   ❌ Failed: ${logs.downloads.failed.length}`);
     logs.downloads.failed.slice(0, 5).forEach(f => {
@@ -417,6 +418,7 @@ function printSummary(startTime) {
   if (process.env.GITHUB_STEP_SUMMARY) {
     let summary = `## 📊 Summary\n`;
     summary += `- ⏱️ Duration: ${duration}s\n`;
+    summary += `- ⚡ Speed: ${imagesPerSecond} images/sec\n`;
     summary += `- 📥 Downloads: ${logs.downloads.success}/${totalDownloads}\n`;
     if (OPTIMIZE) {
       summary += `- 🎨 Optimizations: ${logs.optimizations.success}/${logs.optimizations.success + logs.optimizations.failed.length}\n`;
@@ -461,8 +463,8 @@ async function run() {
     await fs.mkdir(baseDir, { recursive: true });
   }
   
-  // == Process chapters with parallel concurrency ==
-  const chapterLimit = pLimit(2);
+  // == Process chapters with parallel concurrency (OPTIMIZED: 5 chapters at once) ==
+  const chapterLimit = pLimit(5);
   const chapterTasks = chapters.map(ch => 
     chapterLimit(() => processChapter(ch, baseDir))
   );
