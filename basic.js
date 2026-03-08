@@ -447,7 +447,13 @@ function printSummary(startTime, zipFiles = []) {
   console.log('\n' + '═'.repeat(60));
   console.log('📊 DOWNLOAD & OPTIMIZATION SUMMARY');
   console.log('═'.repeat(60));
-  
+  if (process.env.GITHUB_STEP_SUMMARY && manga?.url) {
+  const mangaId = extractMangaId(manga.url);
+  fsSync.appendFileSync(
+    process.env.GITHUB_STEP_SUMMARY,
+    `\n ID: [\`${mangaId}\`](${manga.url.trim()})\n`
+  );
+}
   const totalDownloads = logs.downloads.success + logs.downloads.failed.length;
   console.log(`📥 Downloads: ${logs.downloads.success}/${totalDownloads} succeeded`);
   if (logs.downloads.failed.length > 0) {
@@ -607,6 +613,7 @@ async function run() {
     // ✅ Calculate total size for summary captions
     const totalSize = await calculateTotalSize(zipFiles);
     const mangaId = extractMangaId(manga.url);
+const latestCh = manga.latest_chapter ?? manga.latestChapter ?? '?';
 
     for (let i = 0; i < zipFiles.length; i++) {
       const zip = zipFiles[i];
