@@ -25,13 +25,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y curl zip
-          npm ci
+          npm install
 
       - name: Run downloader + Telegram sender
         env:
