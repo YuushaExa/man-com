@@ -38,24 +38,25 @@ const logs = {
   downloads: { success: 0, failed: [] },
   optimizations: { success: 0, failed: [] },
   chapters: { success: 0, failed: [] },
-  telegram: { success: 0, failed: [] } 
+  telegram: { success: 0, failed: [] }
 };
 
 // == Helpers ==
 function sanitize(str) {
   return (str || '').toString().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
+
 // ✅ Extract manga ID from URL: /title/grljk-asklepios → grljk
 function extractMangaId(url) {
   if (!url) return 'N/A';
   try {
-    // Match pattern: /title/XXXX-anything or /title/XXXX
     const match = url.trim().match(/\/title\/([^-\s\/]+)/);
     return match ? match[1] : 'N/A';
   } catch {
     return 'N/A';
   }
 }
+
 function getOptimizedFilename(originalPath) {
   const dir = path.dirname(originalPath);
   const base = path.basename(originalPath, '.webp');
@@ -246,14 +247,8 @@ async function sendMangaInfo(manga, coverPath) {
     ? manga.description.substring(0, 800) + (manga.description.length > 800 ? '...' : '')
     : 'No description available';
   
-  // ✅ Add URL field to caption with HTML link
-  const urlField = manga.url 
-    ? `\n🔗 <b>URL:</b> <a href="${manga.url}">${manga.url}</a>` 
-    : '';
-  
   const caption = `<b>${title}</b>\n` +
     `${description}\n` +
-    `${urlField}\n` +  // ✅ Insert URL here
     `🏷️ <b>Type:</b> ${manga.type || 'N/A'}\n` +
     `🌐 <b>Language:</b> ${manga.language || 'N/A'}\n` +
     `📊 <b>Status:</b> ${manga.status || 'N/A'}\n` +
@@ -447,13 +442,7 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
   console.log('\n' + '═'.repeat(60));
   console.log('📊 DOWNLOAD & OPTIMIZATION SUMMARY');
   console.log('═'.repeat(60));
-  if (process.env.GITHUB_STEP_SUMMARY && manga?.url) {
-  const mangaId = extractMangaId(manga.url);
-  fsSync.appendFileSync(
-    process.env.GITHUB_STEP_SUMMARY,
-    `\n ID: [\`${mangaId}\`](${manga.url.trim()})\n`
-  );
-}
+  
   const totalDownloads = logs.downloads.success + logs.downloads.failed.length;
   console.log(`📥 Downloads: ${logs.downloads.success}/${totalDownloads} succeeded`);
   if (logs.downloads.failed.length > 0) {
@@ -466,8 +455,7 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
       console.log(`      ...and ${logs.downloads.failed.length - 5} more`);
     }
   }
-      summary += `ID: <code>${mangaId}</code>, Ch:<code>${latestCh}</code>\n`;
-
+  
   if (OPTIMIZE) {
     const totalOpt = logs.optimizations.success + logs.optimizations.failed.length;
     console.log(`🎨 Optimizations: ${logs.optimizations.success}/${totalOpt} succeeded`);
@@ -483,9 +471,10 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
     }
   }
   
-  // ✅ Telegram summary
-  if (logs.telegram.success > 0 || logs.telegram.failed.length > 0) {
-    console.log(`📤 Telegram: ${logs.telegram.success} sent, ${logs.telegram.failed.length} failed`);
+  // ✅ Telegram summary with X/Y format
+  const tgTotal = logs.telegram.success + logs.telegram.failed.length;
+  if (tgTotal > 0) {
+    console.log(`📤 Telegram: ${logs.telegram.success}/${tgTotal} sent`);
     if (logs.telegram.failed.length > 0) {
       logs.telegram.failed.slice(0, 5).forEach(f => {
         console.log(`   ❌ ${f.action}(${f.file || f.photo}): ${f.error}`);
@@ -507,7 +496,7 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
   console.log(`⏱️  Total time: ${duration}s`);
   console.log('═'.repeat(60));
   
-  // ✅ GitHub Actions summary
+  // ✅ GitHub Actions summary - CLEAN version
   if (process.env.GITHUB_STEP_SUMMARY) {
     let summary = `## 📊 Summary\n`;
     summary += `- ⏱️ Duration: ${duration}s\n`;
@@ -516,14 +505,15 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
       summary += `- 🎨 Optimizations: ${logs.optimizations.success}/${logs.optimizations.success + logs.optimizations.failed.length}\n`;
     }
     
-    // ✅ Add Telegram stats to GH summary
-    if (logs.telegram.success > 0 || logs.telegram.failed.length > 0) {
-      summary += `- 📤 Telegram: ${logs.telegram.success} sent`;
-      if (logs.telegram.failed.length > 0) summary += `, ❌ ${logs.telegram.failed.length} failed`;
-      summary += `\n`;
+    // ✅ Telegram with X/Y format
+    if (tgTotal > 0) {
+      summary += `- 📤 Telegram: ${logs.telegram.success}/${tgTotal} sent\n`;
     }
     
-    // ✅ Add total size to GH summary
+    // ✅ Manga ID + Chapter
+    summary += `- 🔗 Manga: \`${mangaId}\` • Ch.\`${latestCh}\`\n`;
+    
+    // ✅ Total size
     if (zipFiles.length > 0) {
       const totalZipSize = zipFiles.reduce((sum, z) => {
         try { return sum + fsSync.statSync(z.path).size; } catch { return sum; }
@@ -531,31 +521,28 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
       summary += `- 📦 Total output: ${formatBytes(totalZipSize)}\n`;
     }
     
+    // ✅ Errors summary only (no duplicates)
     const totalErrors = logs.downloads.failed.length + logs.optimizations.failed.length + logs.telegram.failed.length;
     if (totalErrors > 0) {
-      summary += `- ⚠️ Total errors: ${totalErrors} (check logs)\n`;
+      summary += `- ⚠️ Errors: ${totalErrors}\n`;
     }
     
-    // ✅ Append failed downloads to GH summary for visibility
-    if (logs.downloads.failed.length > 0) {
-      summary += `\n### ❌ Failed Downloads\n`;
-      logs.downloads.failed.slice(0, 10).forEach(f => {
-        summary += `- Ch${f.context.chapter}/Pg${f.context.page}: ${f.error}\n`;
-      });
-      if (logs.downloads.failed.length > 10) {
-        summary += `- ...and ${logs.downloads.failed.length - 10} more\n`;
+    // ✅ Append failed items only if errors exist (keep summary clean)
+    if (logs.downloads.failed.length > 0 || logs.telegram.failed.length > 0) {
+      summary += `\n<details><summary>🔍 View errors</summary>\n\n`;
+      if (logs.downloads.failed.length > 0) {
+        summary += `**Failed Downloads**:\n`;
+        logs.downloads.failed.slice(0, 5).forEach(f => {
+          summary += `- Ch${f.context.chapter}/Pg${f.context.page}: ${f.error}\n`;
+        });
       }
-    }
-    
-    // ✅ Append Telegram failures to GH summary
-    if (logs.telegram.failed.length > 0) {
-      summary += `\n### ❌ Telegram Send Failures\n`;
-      logs.telegram.failed.slice(0, 10).forEach(f => {
-        summary += `- ${f.action}(${f.file || f.photo}): ${f.error}\n`;
-      });
-      if (logs.telegram.failed.length > 10) {
-        summary += `- ...and ${logs.telegram.failed.length - 10} more\n`;
+      if (logs.telegram.failed.length > 0) {
+        summary += `\n**Telegram Failures**:\n`;
+        logs.telegram.failed.slice(0, 5).forEach(f => {
+          summary += `- ${f.action}: ${f.error}\n`;
+        });
       }
+      summary += `\n</details>`;
     }
     
     fsSync.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
@@ -613,9 +600,7 @@ async function run() {
     
     // ✅ Calculate total size for summary captions
     const totalSize = await calculateTotalSize(zipFiles);
-    const mangaId = extractMangaId(manga.url);
-const latestCh = manga.latest_chapter ?? manga.latestChapter ?? '?';
-
+    
     for (let i = 0; i < zipFiles.length; i++) {
       const zip = zipFiles[i];
       const current = i + 1;
@@ -625,7 +610,7 @@ const latestCh = manga.latest_chapter ?? manga.latestChapter ?? '?';
         ? `${zip.minChapter}` 
         : `${zip.minChapter}-${zip.maxChapter}`;
       
-      // ✅ Add total size + current zip size to caption
+      // ✅ Caption unchanged per request
       const caption = `📦 <b>${mangaTitle}</b>\n` +
         `Chapters ${chapterRange}\n` +
         `🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}, ${current}/${total}\n` +
@@ -643,12 +628,16 @@ const latestCh = manga.latest_chapter ?? manga.latestChapter ?? '?';
   }
   
   // == Print Summary ==
-  printSummary(startTime, zipFiles);
+  // ✅ Extract ID + chapter for GitHub summary
+  const mangaId = extractMangaId(manga.url);
+  const latestCh = manga.latest_chapter ?? manga.latestChapter ?? 'N/A';
+  printSummary(startTime, zipFiles, mangaId, latestCh);
 }
 
 // == Run ==
 run().catch(error => {
   console.error('💥 Fatal error:', error);
-  printSummary(Date.now(), []);
+  // ✅ Pass defaults when manga is unavailable
+  printSummary(Date.now(), [], 'N/A', 'N/A');
   process.exit(1);
 });
