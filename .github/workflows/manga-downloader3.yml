@@ -51,32 +51,119 @@ jobs:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
-
           node basic.js \
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}" 2>&1 | tee output.log
 
-      - name: Parse Summary
+      - name: Parse Summary & Merge Status
         id: summary
         run: |
-          DOWNLOADS=$(grep -oP '📥 Downloads: \K[0-9]+/[0-9]+' output.log | head -1 || echo "0/0")
-          OPTIMIZATIONS=$(grep -oP '🎨 Optimizations: \K[0-9]+/[0-9]+' output.log | head -1 || echo "0/0")
-          TOTAL_TIME=$(grep -oP '⏱️  Total time: \K[0-9.]+s' output.log | head -1 || echo "0s")
-          echo "downloads=$DOWNLOADS" >> $GITHUB_OUTPUT
-          echo "optimizations=$OPTIMIZATIONS" >> $GITHUB_OUTPUT
-          echo "total_time=$TOTAL_TIME" >> $GITHUB_OUTPUT
+          # Parse values from output.log
+          DURATION=$(grep -oP '⏱️ Duration: \K[0-9.]+' output.log | head -1 || echo "0")
+          DOWNLOADS_DONE=$(grep -oP '📥 Downloads: \K[0-9]+' output.log | head -1 || echo "0")
+          DOWNLOADS_TOTAL=$(grep -oP '📥 Downloads: [0-9]+/\K[0-9]+' output.log | head -1 || echo "0")
+          OPTIM_DONE=$(grep -oP '🎨 Optimizations: \K[0-9]+' output.log | head -1 || echo "0")
+          OPTIM_TOTAL=$(grep -oP '🎨 Optimizations: [0-9]+/\K[0-9]+' output.log | head -1 || echo "0")
+          MANGA_LINE=$(grep -oP '🔗 Manga: \K.+' output.log | head -1 || echo "")
+          MANGA_NAME=$(echo "$MANGA_LINE" | grep -oP '^[^\s•]+' | head -1 || echo "")
+          CHAPTER_NUM=$(echo "$MANGA_LINE" | grep -oP 'Ch\.\K[0-9.]+' | head -1 || echo "")
+          OUTPUT_SIZE=$(grep -oP '📦 Total output: \K[0-9.]+' output.log | head -1 || echo "0")
+          OUTPUT_UNIT=$(grep -oP '📦 Total output: [0-9.]+\s*\K[MG]B' output.log | head -1 || echo "MB")
 
-      - name: Extract IDs from data.json → list.json
-        run: |
-          node extract-ids.js "${{ github.event.inputs.json_file || 'data.json' }}"
+          # Output for GitHub Actions
+          echo "duration=$DURATION" >> $GITHUB_OUTPUT
+          echo "downloads_done=$DOWNLOADS_DONE" >> $GITHUB_OUTPUT
+          echo "downloads_total=$DOWNLOADS_TOTAL" >> $GITHUB_OUTPUT
+          echo "optim_done=$OPTIM_DONE" >> $GITHUB_OUTPUT
+          echo "manga_name=$MANGA_NAME" >> $GITHUB_OUTPUT
+          echo "chapter_num=$CHAPTER_NUM" >> $GITHUB_OUTPUT
+          echo "output_size=$OUTPUT_SIZE" >> $GITHUB_OUTPUT
+          echo "output_unit=$OUTPUT_UNIT" >> $GITHUB_OUTPUT
+
+          # Use Node.js to merge status.json and update list.json
+          node << 'EOF'
+          const fs = require('fs');
+
+          // Helper to read GITHUB_OUTPUT values
+          const getOutput = (key) => {
+            try {
+              const content = fs.readFileSync(process.env.GITHUB_OUTPUT, 'utf8');
+              const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
+              return match ? match[1] : '';
+            } catch { return ''; }
+          };
+
+          // Read current run values
+          const duration = parseFloat(getOutput('duration')) || 0;
+          const downloadsDone = parseInt(getOutput('downloads_done')) || 0;
+          const mangaName = getOutput('manga_name').trim();
+          const chapterNum = parseFloat(getOutput('chapter_num')) || 0;
+          const outputSize = parseFloat(getOutput('output_size')) || 0;
+          const outputUnit = getOutput('output_unit') || 'MB';
+
+          // === MERGE status.json (cumulative totals ONLY) ===
+          let status = {
+            total_downloads: 0,
+            total_duration: 0,
+            total_output_mb: 0,
+            total_chapters: 0,
+            last_run: null,
+            status: "Ready",
+            icon: "🟢"
+          };
+
+          if (fs.existsSync('status.json')) {
+            try {
+              const existing = JSON.parse(fs.readFileSync('status.json', 'utf8'));
+              status = { ...status, ...existing };
+            } catch (e) { console.warn('Could not parse existing status.json:', e.message); }
+          }
+
+          // Merge cumulative values
+          status.total_downloads = (status.total_downloads || 0) + downloadsDone;
+          status.total_duration = parseFloat((status.total_duration || 0) + duration).toFixed(1);
           
-          # Only commit if list.json changed or is new
-          if git diff --quiet list.json 2>/dev/null; then
-            echo "ℹ️ list.json unchanged, skipping commit"
-          else
-            git add list.json
-            git commit -m "chore: update list.json with extracted IDs [skip ci]" || true
-          fi
+          // Convert output to MB for consistent accumulation
+          const sizeInMB = outputUnit === 'GB' ? outputSize * 1024 : outputSize;
+          status.total_output_mb = parseFloat((status.total_output_mb || 0) + sizeInMB).toFixed(2);
+
+          // Add this run's chapter to the cumulative total (as a number)
+          if (chapterNum > 0) {
+            status.total_chapters = (status.total_chapters || 0) + chapterNum;
+          }
+
+          status.last_run = new Date().toISOString();
+          status.timestamp = status.last_run;
+
+          // Write merged status.json
+          fs.writeFileSync('status.json', JSON.stringify(status, null, 2) + '\n');
+          console.log('✅ status.json merged');
+
+          // === UPDATE list.json (structured objects, numeric chapters, replace on duplicate) ===
+          let mangaList = [];
+          if (fs.existsSync('list.json')) {
+            try {
+              const existing = JSON.parse(fs.readFileSync('list.json', 'utf8'));
+              mangaList = Array.isArray(existing) ? existing : (existing.items || []);
+            } catch (e) { console.warn('Could not parse existing list.json:', e.message); }
+          }
+
+          if (mangaName && chapterNum > 0) {
+            const existingIndex = mangaList.findIndex(item => item.name === mangaName);
+            
+            if (existingIndex !== -1) {
+              // Replace existing entry with new chapter number
+              mangaList[existingIndex] = { name: mangaName, chapter: chapterNum };
+              console.log(`✅ Updated "${mangaName}" to chapter ${chapterNum} in list.json`);
+            } else {
+              // Add new entry
+              mangaList.push({ name: mangaName, chapter: chapterNum });
+              console.log(`✅ Added { name: "${mangaName}", chapter: ${chapterNum} } to list.json`);
+            }
+            
+            fs.writeFileSync('list.json', JSON.stringify({ items: mangaList }, null, 2) + '\n');
+          }
+          EOF
 
       - name: Cleanup downloaded files
         run: |
@@ -88,37 +175,13 @@ jobs:
           find . -type d -name "*_ds" -exec rm -rf {} + 2>/dev/null || true
           rm -f output.log
 
-      - name: Update Status Final
+      - name: Commit Merged Status & List
         if: always()
         run: |
-          TIMESTAMP=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          if [ "${{ job.status }}" == "success" ]; then
-            STATUS="Ready"
-            ICON="🟢"
-          else
-            STATUS="Failed"
-            ICON="❌"
-          fi
-          
-          cat > status.json << EOF
-          {
-            "status": "$STATUS",
-            "icon": "$ICON",
-            "timestamp": "$TIMESTAMP",
-            "summary": {
-              "downloads": "${{ steps.summary.outputs.downloads }}",
-              "optimizations": "${{ steps.summary.outputs.optimizations }}",
-              "total_time": "${{ steps.summary.outputs.total_time }}"
-            }
-          }
-          EOF
-          
-          # Stage both files
           git add status.json list.json 2>/dev/null || git add status.json
           
-          # Commit only if there are changes
           if ! git diff --cached --quiet; then
-            git commit -m "chore: status $STATUS + list.json update [skip ci]" || true
+            git commit -m "chore: merge status + update manga list [skip ci]" || true
             git pull --rebase origin ${{ github.ref_name }} || true
             git push origin HEAD:${{ github.ref_name }} || true
           else
@@ -132,9 +195,16 @@ jobs:
           echo "- 📤 Files sent directly to Telegram" >> $GITHUB_STEP_SUMMARY
           echo "- 🗑️ No artifacts saved (Telegram delivery only)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📊 Optimization Summary" >> $GITHUB_STEP_SUMMARY
+          echo "### 📊 This Run" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "📥 Downloads: ${{ steps.summary.outputs.downloads }}" >> $GITHUB_STEP_SUMMARY
-          echo "🎨 Optimizations: ${{ steps.summary.outputs.optimizations }}" >> $GITHUB_STEP_SUMMARY
-          echo "⏱️  Total time: ${{ steps.summary.outputs.total_time }}" >> $GITHUB_STEP_SUMMARY
+          echo "⏱️ Duration: ${{ steps.summary.outputs.duration }}s" >> $GITHUB_STEP_SUMMARY
+          echo "📥 Downloads: ${{ steps.summary.outputs.downloads_done }}/${{ steps.summary.outputs.downloads_total }}" >> $GITHUB_STEP_SUMMARY
+          echo "🎨 Optimizations: ${{ steps.summary.outputs.optim_done }}/${{ steps.summary.outputs.optim_total }}" >> $GITHUB_STEP_SUMMARY
+          echo "🔗 Manga: ${{ steps.summary.outputs.manga_name }} • Ch.${{ steps.summary.outputs.chapter_num }}" >> $GITHUB_STEP_SUMMARY
+          echo "📦 Output: ${{ steps.summary.outputs.output_size }} ${{ steps.summary.outputs.output_unit }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📈 Cumulative Totals" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat status.json | node -e "const s=JSON.parse(require('fs').readFileSync(0,'utf8')); console.log(\`Total Downloads: \${s.total_downloads}\nTotal Duration: \${s.total_duration}s\nTotal Output: \${s.total_output_mb} MB\nTotal Chapters: \${s.total_chapters}\`)" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
