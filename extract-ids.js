@@ -1,6 +1,11 @@
-// extract-ids.js
-const fs = require('fs');
-const path = require('path');
+// extract-ids.js (ES Module version)
+import fs from 'fs';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+// __dirname equivalent for ES modules
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
 
 const dataFile = process.argv[2] || 'data.json';
 const outputFile = 'list.json';
@@ -17,7 +22,7 @@ try {
       // Extract slug after last slash: "8jv70-mashira"
       const slug = url.split('/').pop() || '';
       // Get part before first dash: "8jv70"
-      const id = slug.split('-')[0];
+      const id = slug.split('-')[0].trim();
       return id || null;
     })
     .filter(id => id && id.length > 0);
