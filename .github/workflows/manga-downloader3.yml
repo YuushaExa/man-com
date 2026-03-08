@@ -58,48 +58,74 @@ jobs:
       - name: Parse Summary & Merge Status
         id: summary
         run: |
-          # Parse values from output.log
-          DURATION=$(grep -oP '⏱️ Duration: \K[0-9.]+' output.log | head -1 || echo "0")
-          DOWNLOADS_DONE=$(grep -oP '📥 Downloads: \K[0-9]+' output.log | head -1 || echo "0")
-          DOWNLOADS_TOTAL=$(grep -oP '📥 Downloads: [0-9]+/\K[0-9]+' output.log | head -1 || echo "0")
-          OPTIM_DONE=$(grep -oP '🎨 Optimizations: \K[0-9]+' output.log | head -1 || echo "0")
-          OPTIM_TOTAL=$(grep -oP '🎨 Optimizations: [0-9]+/\K[0-9]+' output.log | head -1 || echo "0")
-          MANGA_LINE=$(grep -oP '🔗 Manga: \K.+' output.log | head -1 || echo "")
-          MANGA_NAME=$(echo "$MANGA_LINE" | grep -oP '^[^\s•]+' | head -1 || echo "")
-          CHAPTER_NUM=$(echo "$MANGA_LINE" | grep -oP 'Ch\.\K[0-9.]+' | head -1 || echo "")
-          OUTPUT_SIZE=$(grep -oP '📦 Total output: \K[0-9.]+' output.log | head -1 || echo "0")
-          OUTPUT_UNIT=$(grep -oP '📦 Total output: [0-9.]+\s*\K[MG]B' output.log | head -1 || echo "MB")
-
-          # Output for GitHub Actions
-          echo "duration=$DURATION" >> $GITHUB_OUTPUT
-          echo "downloads_done=$DOWNLOADS_DONE" >> $GITHUB_OUTPUT
-          echo "downloads_total=$DOWNLOADS_TOTAL" >> $GITHUB_OUTPUT
-          echo "optim_done=$OPTIM_DONE" >> $GITHUB_OUTPUT
-          echo "manga_name=$MANGA_NAME" >> $GITHUB_OUTPUT
-          echo "chapter_num=$CHAPTER_NUM" >> $GITHUB_OUTPUT
-          echo "output_size=$OUTPUT_SIZE" >> $GITHUB_OUTPUT
-          echo "output_unit=$OUTPUT_UNIT" >> $GITHUB_OUTPUT
-
-          # Use Node.js to merge status.json and update list.json
           node << 'EOF'
           const fs = require('fs');
 
-          // Helper to read GITHUB_OUTPUT values
-          const getOutput = (key) => {
-            try {
-              const content = fs.readFileSync(process.env.GITHUB_OUTPUT, 'utf8');
-              const match = content.match(new RegExp(`^${key}=(.*)$`, 'm'));
-              return match ? match[1] : '';
-            } catch { return ''; }
-          };
+          // Read output.log
+          const logContent = fs.readFileSync('output.log', 'utf8');
+          const lines = logContent.split('\n');
 
-          // Read current run values
-          const duration = parseFloat(getOutput('duration')) || 0;
-          const downloadsDone = parseInt(getOutput('downloads_done')) || 0;
-          const mangaName = getOutput('manga_name').trim();
-          const chapterNum = parseFloat(getOutput('chapter_num')) || 0;
-          const outputSize = parseFloat(getOutput('output_size')) || 0;
-          const outputUnit = getOutput('output_unit') || 'MB';
+          // Parse values using flexible regex
+          let duration = '0';
+          let downloadsDone = '0';
+          let downloadsTotal = '0';
+          let optimDone = '0';
+          let optimTotal = '0';
+          let mangaName = '';
+          let chapterNum = '0';
+          let outputSize = '0';
+          let outputUnit = 'MB';
+
+          for (const line of lines) {
+            // Duration: ⏱️ Duration: 35.7s
+            const durationMatch = line.match(/Duration:\s*([0-9.]+)\s*s/i);
+            if (durationMatch) duration = durationMatch[1];
+
+            // Downloads: 📥 Downloads: 82/82
+            const downloadsMatch = line.match(/Downloads:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
+            if (downloadsMatch) {
+              downloadsDone = downloadsMatch[1];
+              downloadsTotal = downloadsMatch[2];
+            }
+
+            // Optimizations: 🎨 Optimizations: 82/82
+            const optimMatch = line.match(/Optimizations:\s*([0-9]+)\s*\/\s*([0-9]+)/i);
+            if (optimMatch) {
+              optimDone = optimMatch[1];
+              optimTotal = optimMatch[2];
+            }
+
+            // Manga: 🔗 Manga: xkqm7 • Ch.?
+            const mangaMatch = line.match(/Manga:\s*([^\s•]+)\s*•\s*Ch\.([0-9.]+|\?)/i);
+            if (mangaMatch) {
+              mangaName = mangaMatch[1].trim();
+              chapterNum = mangaMatch[2] === '?' ? '0' : mangaMatch[2];
+            }
+
+            // Output: 📦 Total output: 13.38 MB
+            const outputMatch = line.match(/Total output:\s*([0-9.]+)\s*(MB|GB)/i);
+            if (outputMatch) {
+              outputSize = outputMatch[1];
+              outputUnit = outputMatch[2].toUpperCase();
+            }
+          }
+
+          // Write to GITHUB_OUTPUT
+          const output = [
+            `duration=${duration}`,
+            `downloads_done=${downloadsDone}`,
+            `downloads_total=${downloadsTotal}`,
+            `optim_done=${optimDone}`,
+            `optim_total=${optimTotal}`,
+            `manga_name=${mangaName}`,
+            `chapter_num=${chapterNum}`,
+            `output_size=${outputSize}`,
+            `output_unit=${outputUnit}`
+          ].join('\n');
+
+          fs.appendFileSync(process.env.GITHUB_OUTPUT, output + '\n');
+
+          console.log(`Parsed: Duration=${duration}s, Downloads=${downloadsDone}/${downloadsTotal}, Manga=${mangaName} Ch.${chapterNum}, Output=${outputSize}${outputUnit}`);
 
           // === MERGE status.json (cumulative totals ONLY) ===
           let status = {
@@ -120,16 +146,17 @@ jobs:
           }
 
           // Merge cumulative values
-          status.total_downloads = (status.total_downloads || 0) + downloadsDone;
-          status.total_duration = parseFloat((status.total_duration || 0) + duration).toFixed(1);
+          status.total_downloads = (status.total_downloads || 0) + parseInt(downloadsDone);
+          status.total_duration = parseFloat((status.total_duration || 0) + parseFloat(duration)).toFixed(1);
           
           // Convert output to MB for consistent accumulation
-          const sizeInMB = outputUnit === 'GB' ? outputSize * 1024 : outputSize;
+          const sizeInMB = outputUnit === 'GB' ? parseFloat(outputSize) * 1024 : parseFloat(outputSize);
           status.total_output_mb = parseFloat((status.total_output_mb || 0) + sizeInMB).toFixed(2);
 
           // Add this run's chapter to the cumulative total (as a number)
-          if (chapterNum > 0) {
-            status.total_chapters = (status.total_chapters || 0) + chapterNum;
+          const chapNum = parseFloat(chapterNum);
+          if (chapNum > 0) {
+            status.total_chapters = (status.total_chapters || 0) + chapNum;
           }
 
           status.last_run = new Date().toISOString();
@@ -148,20 +175,22 @@ jobs:
             } catch (e) { console.warn('Could not parse existing list.json:', e.message); }
           }
 
-          if (mangaName && chapterNum > 0) {
+          if (mangaName && chapNum > 0) {
             const existingIndex = mangaList.findIndex(item => item.name === mangaName);
             
             if (existingIndex !== -1) {
               // Replace existing entry with new chapter number
-              mangaList[existingIndex] = { name: mangaName, chapter: chapterNum };
-              console.log(`✅ Updated "${mangaName}" to chapter ${chapterNum} in list.json`);
+              mangaList[existingIndex] = { name: mangaName, chapter: chapNum };
+              console.log(`✅ Updated "${mangaName}" to chapter ${chapNum} in list.json`);
             } else {
               // Add new entry
-              mangaList.push({ name: mangaName, chapter: chapterNum });
-              console.log(`✅ Added { name: "${mangaName}", chapter: ${chapterNum} } to list.json`);
+              mangaList.push({ name: mangaName, chapter: chapNum });
+              console.log(`✅ Added { name: "${mangaName}", chapter: ${chapNum} } to list.json`);
             }
             
             fs.writeFileSync('list.json', JSON.stringify({ items: mangaList }, null, 2) + '\n');
+          } else if (mangaName) {
+            console.log(`ℹ️ Manga "${mangaName}" has unknown chapter (?), skipping list.json update`);
           }
           EOF
 
