@@ -137,27 +137,6 @@ jobs:
 
           // === WRITE GITHUB_STEP_SUMMARY ===
           const summary = `## ✅ Process Complete
-- 📤 Files sent directly to Telegram
-- 🗑️ No artifacts saved (Telegram delivery only)
-
-### 📊 This Run
-\`\`\`
-⏱️ Duration: ${duration}s
-📥 Downloads: ${downloadsDone}/${downloadsTotal}
-🎨 Optimizations: ${optimDone}/${optimTotal}
-🔗 Manga: ${mangaName} • Ch.${chapterNum}
-📦 Output: ${outputSize} ${outputUnit}
-\`\`\`
-
-### 📈 Cumulative Totals
-\`\`\`
-Total Downloads: ${status.total_downloads}
-Total Duration: ${status.total_duration}s
-Total Output: ${status.total_output_mb} MB
-Total Chapters: ${status.total_chapters}
-\`\`\`
-`;
-
           fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
           console.log('✅ Summary written');
           EOF
