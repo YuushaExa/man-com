@@ -1,5 +1,5 @@
 // basic.js - ES Module | Parallel | Sharp | Telegram | Split Zips | Logging
-// ✅ UPDATED: Separates display title (with spaces) from safe title (for filenames)
+// ✅ FIXED: escapeHtml robustness + formatList safety
 import fs from 'fs/promises';
 import * as fsSync from 'fs';
 import path from 'path';
@@ -43,14 +43,13 @@ const logs = {
 };
 
 // == Helpers ==
-// ✅ Sanitize ONLY for filesystem/URL safety
 function sanitize(str) {
   return (str || '').toString().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
 
-// ✅ Escape HTML for Telegram captions (preserves spaces & formatting)
+// ✅ FIXED: Always coerce to string before .replace()
 function escapeHtml(str) {
-  return (str || '')
+  return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
@@ -58,7 +57,16 @@ function escapeHtml(str) {
     .replace(/'/g, '&#039;');
 }
 
-// ✅ Extract manga ID from URL: /title/grljk-asklepios → grljk
+// ✅ Helper: normalize field to array of values
+const toArray = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'string') {
+    return val.split(',').map(s => s.trim()).filter(s => s);
+  }
+  return [val];
+};
+
 function extractMangaId(url) {
   if (!url) return 'N/A';
   try {
@@ -143,7 +151,6 @@ function formatBytes(bytes) {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
 }
 
-// ✅ Calculate total size of zip files
 async function calculateTotalSize(zipFiles) {
   let total = 0;
   for (const zip of zipFiles) {
@@ -243,23 +250,22 @@ async function telegramSendDocument(filePath, caption, replyToMessageId, thumbPa
   }
 }
 
-// ✅ UPDATED: Uses displayTitle for captions, safeTitle for file paths
 async function sendMangaInfo(manga, coverPath, displayTitle) {
   if (!TG_BOT_TOKEN || !TG_CHAT_ID) {
     console.log('⚠️  Telegram not configured (missing TG_BOT_TOKEN or TG_CHAT_ID)');
     return null;
   }
   
+  // ✅ FIXED: Safe formatList with escapeHtml + toArray
   const formatList = (arr, label) => {
     if (!arr || !Array.isArray(arr) || arr.length === 0) return '';
-    return `\n${label}: ${arr.join(', ')}`;
+    const safeItems = arr.map(item => escapeHtml(item));
+    return `\n${label}: ${safeItems.join(', ')}`;
   };
   
-  // ✅ Use display title (with spaces) for caption
   const titleHtml = escapeHtml(displayTitle);
-  const description = manga.description 
-    ? escapeHtml(manga.description.substring(0, 800)) + (manga.description.length > 800 ? '...' : '')
-    : 'No description available';
+  const descRaw = manga.description || '';
+  const description = escapeHtml(descRaw.substring(0, 800)) + (descRaw.length > 800 ? '...' : '');
   
   const caption = `<b>${titleHtml}</b>\n` +
     `${description}\n` +
@@ -268,9 +274,9 @@ async function sendMangaInfo(manga, coverPath, displayTitle) {
     `📊 <b>Status:</b> ${escapeHtml(manga.status || 'N/A')}\n` +
     `📅 <b>Year:</b> ${escapeHtml(manga.year || 'N/A')}\n` +
     `🔢 <b>Latest Chapter:</b> ${escapeHtml(manga.latest_chapter || 'N/A')}` +
-    formatList(manga.genres?.map(escapeHtml), '🎭 <b>Genres</b>') +
-    formatList(manga.authors?.map(escapeHtml), '✍️ <b>Authors</b>') +
-    formatList(manga.artists?.map(escapeHtml), '🎨 <b>Artists</b>');
+    formatList(toArray(manga.genres), '🎭 <b>Genres</b>') +
+    formatList(toArray(manga.authors), '✍️ <b>Authors</b>') +
+    formatList(toArray(manga.artists), '🎨 <b>Artists</b>');
   
   console.log('📤 Sending manga info to Telegram...');
   const messageId = await telegramSendPhoto(caption, coverPath, coverPath);
@@ -281,7 +287,6 @@ async function sendMangaInfo(manga, coverPath, displayTitle) {
   return messageId;
 }
 
-// ✅ UPDATED: Uses safeTitle for zip filenames, displayTitle available for captions if needed
 async function createZipGroups(baseDir, chapters, safeTitle, displayTitle) {
   const groups = [];
   let currentGroup = [];
@@ -326,7 +331,6 @@ async function createZipGroups(baseDir, chapters, safeTitle, displayTitle) {
       ? `ch${minChapter}` 
       : `ch${minChapter}-${maxChapter}`;
     
-    // ✅ Zip filename uses SAFE title (underscores) for filesystem safety
     const zipName = `${safeTitle}_${chapterRange}_ds.zip`;
     
     console.log(`🗜️  Creating zip ${i + 1}/${groups.length}: ${zipName}`);
@@ -343,7 +347,6 @@ async function createZipGroups(baseDir, chapters, safeTitle, displayTitle) {
       name: zipName, 
       minChapter, 
       maxChapter,
-      // ✅ Keep display title reference for captions
       displayTitle 
     });
   }
@@ -351,7 +354,6 @@ async function createZipGroups(baseDir, chapters, safeTitle, displayTitle) {
   return zipFiles;
 }
 
-// == Download single image with curl ==
 async function downloadImage(imageUrl, outputFile) {
   const curlCmd = `curl -sL \
     -H "Referer: https://comix.to/" \
@@ -368,7 +370,6 @@ async function downloadImage(imageUrl, outputFile) {
   execSync(curlCmd, { stdio: 'ignore' });
 }
 
-// == Process a single chapter with parallel downloads ==
 async function processChapter(chapter, baseDir, displayTitle) {
   const chapterNum = chapter.number;
   const chapterName = chapter.name || '';
@@ -383,7 +384,6 @@ async function processChapter(chapter, baseDir, displayTitle) {
     await fs.mkdir(chapterDir, { recursive: true });
   }
   
-  // ✅ Log uses display title with spaces
   console.log(`⬇️  [${displayTitle}] Chapter ${chapterNum}: ${chapterDir} (${chapter.pages_count} pages)`);
   
   const downloadLimit = pLimit(DOWNLOAD_CONCURRENCY);
@@ -394,7 +394,6 @@ async function processChapter(chapter, baseDir, displayTitle) {
       const pagePadded = String(pageIndex + 1).padStart(3, '0');
       const outputFile = path.join(chapterDir, `${pagePadded}.webp`);
       
-      // Skip if final file already exists (cache)
       const finalFile = OPTIMIZE ? getOptimizedFilename(outputFile) : outputFile;
       if (fsSync.existsSync(finalFile)) {
         process.stdout.write('↻');
@@ -427,7 +426,6 @@ async function processChapter(chapter, baseDir, displayTitle) {
   
   await Promise.all(downloadTasks);
   
-  // == Parallel Optimization ==
   if (OPTIMIZE && filesToOptimize.length > 0) {
     console.log(`\n🎨 Optimizing ${filesToOptimize.length} images (parallel)...`);
     const optimizeLimit = pLimit(OPTIMIZE_CONCURRENCY);
@@ -453,7 +451,6 @@ async function processChapter(chapter, baseDir, displayTitle) {
   return { success: true, chapter: chapterNum };
 }
 
-// == Print final summary ==
 function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A', displayTitle = 'N/A') {
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   
@@ -489,7 +486,6 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
     }
   }
   
-  // ✅ Telegram summary with X/Y format
   const tgTotal = logs.telegram.success + logs.telegram.failed.length;
   if (tgTotal > 0) {
     console.log(`📤 Telegram: ${logs.telegram.success}/${tgTotal} sent`);
@@ -503,7 +499,6 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
     }
   }
   
-  // ✅ Total output size
   if (zipFiles.length > 0) {
     const totalZipSize = zipFiles.reduce((sum, z) => {
       try { return sum + fsSync.statSync(z.path).size; } catch { return sum; }
@@ -513,10 +508,8 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
   
   console.log(`⏱️  Total time: ${duration}s`);
   console.log('═'.repeat(60));
-  // ✅ Show display title with spaces in summary
   console.log(`🔗 Manga: ${displayTitle} • Ch.${latestCh}`);
 
-  // ✅ GitHub Actions summary - CLEAN version
   if (process.env.GITHUB_STEP_SUMMARY) {
     let summary = `## 📊 Summary\n`;
     summary += `- ⏱️ Duration: ${duration}s\n`;
@@ -525,15 +518,12 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
       summary += `- 🎨 Optimizations: ${logs.optimizations.success}/${logs.optimizations.success + logs.optimizations.failed.length}\n`;
     }
     
-    // ✅ Telegram with X/Y format
     if (tgTotal > 0) {
       summary += `- 📤 Telegram: ${logs.telegram.success}/${tgTotal} sent\n`;
     }
     
-    // ✅ Manga title with spaces + Chapter
     summary += `- 🔗 Manga: \`${escapeHtml(displayTitle)}\` • Ch.\`${latestCh}\`\n`;
     
-    // ✅ Total size
     if (zipFiles.length > 0) {
       const totalZipSize = zipFiles.reduce((sum, z) => {
         try { return sum + fsSync.statSync(z.path).size; } catch { return sum; }
@@ -541,13 +531,11 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
       summary += `- 📦 Total output: ${formatBytes(totalZipSize)}\n`;
     }
     
-    // ✅ Errors summary only (no duplicates)
     const totalErrors = logs.downloads.failed.length + logs.optimizations.failed.length + logs.telegram.failed.length;
     if (totalErrors > 0) {
       summary += `- ⚠️ Errors: ${totalErrors}\n`;
     }
     
-    // ✅ Append failed items only if errors exist (keep summary clean)
     if (logs.downloads.failed.length > 0 || logs.telegram.failed.length > 0) {
       summary += `\n<details><summary>🔍 View errors</summary>\n\n`;
       if (logs.downloads.failed.length > 0) {
@@ -569,7 +557,6 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
   }
 }
 
-// == Main Logic ==
 async function run() {
   const startTime = Date.now();
   console.log(`🚀 Started at ${new Date().toISOString()}`);
@@ -578,16 +565,13 @@ async function run() {
   const manga = data.manga;
   const chapters = data.chapters;
   
-  // ✅ SEPARATE: Display title (with spaces) vs Safe title (for filenames)
-  const displayTitle = manga.title || 'Unknown';           // "Kigata Ga Kita" — for captions, logs
-  const safeTitle = sanitize(displayTitle);                 // "Kigata_Ga_Kita" — for files/folders
+  const displayTitle = manga.title || 'Unknown';
+  const safeTitle = sanitize(displayTitle);
   
   console.log(`📚 Downloading: ${displayTitle}`);
   
-  // == Download cover image ==
   let coverPath = null;
   if (manga.cover && TG_BOT_TOKEN) {
-    // ✅ Use safeTitle for cover filename
     coverPath = path.join(__dirname, `${safeTitle}_cover.jpg`);
     const curlCmd = `curl -sL -o "${coverPath}" "${manga.cover}" --retry 3 --connect-timeout 30`;
     try {
@@ -599,13 +583,11 @@ async function run() {
     }
   }
   
-  // == Create Base Directory (uses SAFE title) ==
   const baseDir = safeTitle;
   if (!fsSync.existsSync(baseDir)) {
     await fs.mkdir(baseDir, { recursive: true });
   }
   
-  // == Process chapters with parallel concurrency ==
   const chapterLimit = pLimit(2);
   const chapterTasks = chapters.map(ch => 
     chapterLimit(() => processChapter(ch, baseDir, displayTitle))
@@ -613,17 +595,13 @@ async function run() {
   
   await Promise.all(chapterTasks);
   
-  // == Create Split Zips (uses SAFE title for filenames) ==
   console.log('\n📦 Calculating zip groups...');
   const zipFiles = await createZipGroups(baseDir, chapters, safeTitle, displayTitle);
   
-  // == Send to Telegram ==
   let infoMessageId = null;
   if (TG_BOT_TOKEN && TG_CHAT_ID) {
-    // ✅ Pass displayTitle for natural-looking captions
     infoMessageId = await sendMangaInfo(manga, coverPath, displayTitle);
     
-    // ✅ Calculate total size for summary captions
     const totalSize = await calculateTotalSize(zipFiles);
     
     for (let i = 0; i < zipFiles.length; i++) {
@@ -635,7 +613,6 @@ async function run() {
         ? `${zip.minChapter}` 
         : `${zip.minChapter}-${zip.maxChapter}`;
       
-      // ✅ Caption uses DISPLAY title with spaces + proper HTML escaping
       const caption = `📦 <b>${escapeHtml(zip.displayTitle)}</b>\n` +
         `Chapters ${chapterRange}\n` +
         `🎨 WebP ${OPTIMIZE ? '(optimized, ds)' : ''}, ${current}/${total}\n` +
@@ -652,17 +629,13 @@ async function run() {
     zipFiles.forEach(z => console.log(`   - ${z.name}`));
   }
   
-  // == Print Summary ==
-  // ✅ Extract ID + chapter for GitHub summary
   const mangaId = extractMangaId(manga.url);
   const latestCh = manga.latest_chapter ?? manga.latestChapter ?? 'N/A';
   printSummary(startTime, zipFiles, mangaId, latestCh, displayTitle);
 }
 
-// == Run ==
 run().catch(error => {
   console.error('💥 Fatal error:', error);
-  // ✅ Pass defaults when manga is unavailable
   printSummary(Date.now(), [], 'N/A', 'N/A', 'Unknown');
   process.exit(1);
 });
