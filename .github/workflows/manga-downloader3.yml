@@ -39,11 +39,21 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install dependencies
+      - name: Cache npm dependencies
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('**/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y curl zip
-          npm install
+
+      - name: Install npm dependencies
+        run: npm install  # Use install (not ci) since no lockfile
 
       - name: Run downloader + Telegram sender
         id: downloader
