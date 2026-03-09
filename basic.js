@@ -82,7 +82,28 @@ function extractMangaId(url) {
     return 'N/A';
   }
 }
-
+// ✅ Deduplicate chapters by number + normalized name
+function dedupeChapters(chapters) {
+  const seen = new Map();
+  const deduped = [];
+  
+  for (const ch of chapters) {
+    // Create a key: chapter number + lowercase trimmed name
+    const nameKey = (ch.name || '').toLowerCase().trim().replace(/\s+/g, ' ');
+    const key = `${ch.number}|${nameKey}`;
+    
+    if (seen.has(key)) {
+      console.log(`⚠️  Skipping duplicate: Ch${ch.number} "${ch.name}"`);
+      continue;
+    }
+    
+    seen.set(key, true);
+    deduped.push(ch);
+  }
+  
+  console.log(`📋 Chapters: ${chapters.length} → ${deduped.length} after dedupe`);
+  return deduped;
+}
 function getOptimizedFilename(originalPath) {
   const dir = path.dirname(originalPath);
   const base = path.basename(originalPath, '.webp');
@@ -569,7 +590,7 @@ async function run() {
   
   const data = JSON.parse(await fs.readFile(JSON_FILE, 'utf8'));
   const manga = data.manga;
-  const chapters = data.chapters;
+    const chapters = dedupeChapters(data.chapters);
   
   const displayTitle = manga.title || 'Unknown';
   const safeTitle = sanitize(displayTitle);
