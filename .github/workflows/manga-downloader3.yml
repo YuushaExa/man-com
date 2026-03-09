@@ -58,16 +58,35 @@ jobs:
       - name: Parse Summary
         id: summary
         run: |
-          # Parse the new summary format from output.log
-          DURATION=$(grep -oP '⏱️ Duration: \K[0-9.]+' output.log | head -1 || echo "0")
-          # Get successful downloads (first number in X/Y format)
-          DOWNLOADS=$(grep -oP '📥 Downloads: \K[0-9]+' output.log | head -1 || echo "0")
-          MANGA_ID=$(grep -oP '🔗 Manga: \K[a-zA-Z0-9_-]+' output.log | head -1 || echo "")
-          CHAPTER=$(grep -oP '🔗 Manga: .* • Ch\.\K[0-9]+' output.log | head -1 || echo "0")
-          TOTAL_OUTPUT=$(grep -oP '📦 Total output: \K[0-9.]+' output.log | head -1 || echo "0")
+          # Parse from console output (output.log) - matches basic.js printSummary() format
+          # Format: "⏱️  Total time: 130.5s" (note double space after emoji)
+          DURATION=$(grep -oP '⏱️\s*Total time:\s*\K[0-9.]+' output.log | head -1 || echo "0")
+          
+          # Format: "📥 Downloads: 154/154 succeeded" - get first number
+          DOWNLOADS=$(grep -oP '📥\s*Downloads:\s*\K[0-9]+' output.log | head -1 || echo "0")
+          
+          # Format: "📦 Total output size: 49.79 MB"
+          TOTAL_OUTPUT=$(grep -oP '📦\s*Total output size:\s*\K[0-9.]+' output.log | head -1 || echo "0")
+          
+          # Extract manga ID and chapter from data.json directly (more reliable than parsing logs)
+          MANGA_INFO=$(node -e "
+            const fs = require('fs');
+            const data = JSON.parse(fs.readFileSync('${{ github.event.inputs.json_file || 'data.json' }}', 'utf8'));
+            const manga = data.manga || {};
+            const url = manga.url || '';
+            // Extract ID from URL: /title/grljk-asklepios → grljk
+            const match = url.match(/\/title\/([^-\s\/]+)/);
+            const mangaId = match ? match[1] : 'N/A';
+            // Get chapter: try multiple possible field names
+            const chapter = manga.latest_chapter ?? manga.latestChapter ?? manga.chapter ?? 0;
+            console.log(mangaId + '|' + chapter);
+          ")
+          MANGA_ID=$(echo "$MANGA_INFO" | cut -d'|' -f1)
+          CHAPTER=$(echo "$MANGA_INFO" | cut -d'|' -f2)
           
           # Fallback defaults
           : "${DURATION:=0}"; : "${DOWNLOADS:=0}"; : "${CHAPTER:=0}"; : "${TOTAL_OUTPUT:=0}"
+          : "${MANGA_ID:=N/A}"
           
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
           echo "downloads=$DOWNLOADS" >> $GITHUB_OUTPUT
@@ -80,7 +99,7 @@ jobs:
           node << 'EOF'
             const fs = require('fs');
             
-            // === Update status.json (cumulative stats) ===
+            // === Update status.json (ALL cumulative stats) ===
             let status = {};
             if (fs.existsSync('status.json')) {
               try {
@@ -95,18 +114,17 @@ jobs:
             const newOutput = parseFloat('${{ steps.summary.outputs.total_output }}') || 0;
             const newChapter = parseInt('${{ steps.summary.outputs.chapter }}') || 0;
             
-            // Merge cumulative values
+            // Merge ALL cumulative values (including chapters)
             status.total_downloads = (status.total_downloads || 0) + newDownloads;
             status.total_duration = (status.total_duration || 0) + newDuration;
             status.total_output = (status.total_output || 0) + newOutput;
-            // Latest chapter: just store the number (not cumulative)
-            status.latest_chapter = newChapter;
+            status.total_chapters = (status.total_chapters || 0) + newChapter;
             status.last_updated = new Date().toISOString();
             
             fs.writeFileSync('status.json', JSON.stringify(status, null, 2));
             console.log('✅ Updated status.json');
             
-            // === Update list.json (manga: highest chapter) ===
+            // === Update list.json (manga: highest chapter, deduplicated) ===
             let list = {};
             if (fs.existsSync('list.json')) {
               try {
@@ -119,7 +137,7 @@ jobs:
             const mangaId = '${{ steps.summary.outputs.manga_id }}';
             const chapter = parseInt('${{ steps.summary.outputs.chapter }}');
             
-            if (mangaId && chapter) {
+            if (mangaId && mangaId !== 'N/A' && chapter) {
               // Only update if chapter is higher than stored (deduplication)
               if (!list[mangaId] || list[mangaId] < chapter) {
                 list[mangaId] = chapter;
