@@ -38,15 +38,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'  
 
-      - name: Install system dependencies
+      - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y curl zip
-
-      - name: Install npm dependencies
-        run: npm install 
+          npm install
 
       - name: Run downloader + Telegram sender
         id: downloader
