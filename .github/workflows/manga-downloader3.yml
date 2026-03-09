@@ -68,8 +68,8 @@ jobs:
           
           MANGA_LINE=$(grep '🔗 Manga' output.log | head -1)
           MANGA_ID=$(echo "$MANGA_LINE" | sed -n 's/.*Manga: \([a-zA-Z0-9_-]*\).*/\1/p' | xargs)
-          CHAPTER=$(echo "$MANGA_LINE" | sed -n 's/.*Ch\.\([0-9]*\).*/\1/p' | xargs)
-          
+          CHAPTER=$(grep -oP '🔗 Manga:.*Ch\.\K[0-9.]+' output.log | head -1 | xargs)
+          CHAPTER=${CHAPTER:-$(node -p "require('./${{ github.event.inputs.json_file || 'data.json' }}')?.manga?.latest_chapter || 1")}          
           DURATION=${DURATION:-0}
           DOWNLOADS=${DOWNLOADS:-0}
           TOTAL_OUTPUT=${TOTAL_OUTPUT:-0}
