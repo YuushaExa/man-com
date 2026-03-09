@@ -46,7 +46,13 @@ const logs = {
 function sanitize(str) {
   return (str || '').toString().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
-
+function hasFailures() {
+  return (
+    logs.downloads.failed.length > 0 ||
+    logs.optimizations.failed.length > 0 ||
+    logs.telegram.failed.length > 0
+  );
+}
 // ✅ FIXED: Always coerce to string before .replace()
 function escapeHtml(str) {
   return String(str ?? '')
@@ -276,8 +282,7 @@ async function sendMangaInfo(manga, coverPath, displayTitle) {
     `🔢 <b>Latest Chapter:</b> ${escapeHtml(manga.latest_chapter || 'N/A')}` +
     formatList(toArray(manga.genres), '🎭 <b>Genres</b>') +
     formatList(toArray(manga.authors), '✍️ <b>Authors</b>') +
-    formatList(toArray(manga.artists), '🎨 <b>Artists</b>\n') +
-    `📊 <b>Total:</b> ${formatBytes(totalSize)}`;
+    formatList(toArray(manga.artists), '🎨 <b>Artists</b>');
   
   console.log('📤 Sending manga info to Telegram...');
   const messageId = await telegramSendPhoto(caption, coverPath, coverPath);
@@ -630,13 +635,19 @@ async function run() {
     zipFiles.forEach(z => console.log(`   - ${z.name}`));
   }
   
-  const mangaId = extractMangaId(manga.url);
+ const mangaId = extractMangaId(manga.url);
   const latestCh = manga.latest_chapter ?? manga.latestChapter ?? 'N/A';
   printSummary(startTime, zipFiles, mangaId, latestCh, displayTitle);
+
+  // 🔴 Exit with error if any failures occurred (for GitHub Actions)
+  if (hasFailures()) {
+    console.error('\n❌ Workflow failed due to errors above.');
+    process.exit(1);
+  }
 }
 
 run().catch(error => {
   console.error('💥 Fatal error:', error);
   printSummary(Date.now(), [], 'N/A', 'N/A', 'Unknown');
-  process.exit(1);
+  process.exit(1); 
 });
