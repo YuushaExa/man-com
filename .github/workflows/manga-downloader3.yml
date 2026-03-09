@@ -58,8 +58,8 @@ jobs:
       - name: Parse Summary
         id: summary
         run: |
-          # Parse from console output (output.log) - matches basic.js printSummary() format
-          # Format: "⏱️  Total time: 130.5s" (note double space after emoji)
+          # Parse from output.log (matches basic.js console output format)
+          # Format: "⏱️  Total time: 130.5s" (note spacing)
           DURATION=$(grep -oP '⏱️\s*Total time:\s*\K[0-9.]+' output.log | head -1 || echo "0")
           
           # Format: "📥 Downloads: 154/154 succeeded" - get first number
@@ -68,21 +68,9 @@ jobs:
           # Format: "📦 Total output size: 49.79 MB"
           TOTAL_OUTPUT=$(grep -oP '📦\s*Total output size:\s*\K[0-9.]+' output.log | head -1 || echo "0")
           
-          # Extract manga ID and chapter from data.json directly (more reliable than parsing logs)
-          MANGA_INFO=$(node -e "
-            const fs = require('fs');
-            const data = JSON.parse(fs.readFileSync('${{ github.event.inputs.json_file || 'data.json' }}', 'utf8'));
-            const manga = data.manga || {};
-            const url = manga.url || '';
-            // Extract ID from URL: /title/grljk-asklepios → grljk
-            const match = url.match(/\/title\/([^-\s\/]+)/);
-            const mangaId = match ? match[1] : 'N/A';
-            // Get chapter: try multiple possible field names
-            const chapter = manga.latest_chapter ?? manga.latestChapter ?? manga.chapter ?? 0;
-            console.log(mangaId + '|' + chapter);
-          ")
-          MANGA_ID=$(echo "$MANGA_INFO" | cut -d'|' -f1)
-          CHAPTER=$(echo "$MANGA_INFO" | cut -d'|' -f2)
+          # Format: "🔗 Manga: grljk • Ch.19" (added to basic.js printSummary)
+          MANGA_ID=$(grep -oP '🔗\s*Manga:\s*\K[a-zA-Z0-9_-]+' output.log | head -1 || echo "N/A")
+          CHAPTER=$(grep -oP '🔗\s*Manga:.*•\s*Ch\.\K[0-9]+' output.log | head -1 || echo "0")
           
           # Fallback defaults
           : "${DURATION:=0}"; : "${DOWNLOADS:=0}"; : "${CHAPTER:=0}"; : "${TOTAL_OUTPUT:=0}"
@@ -114,7 +102,7 @@ jobs:
             const newOutput = parseFloat('${{ steps.summary.outputs.total_output }}') || 0;
             const newChapter = parseInt('${{ steps.summary.outputs.chapter }}') || 0;
             
-            // Merge ALL cumulative values (including chapters)
+            // Merge ALL cumulative values
             status.total_downloads = (status.total_downloads || 0) + newDownloads;
             status.total_duration = (status.total_duration || 0) + newDuration;
             status.total_output = (status.total_output || 0) + newOutput;
