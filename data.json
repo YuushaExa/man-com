@@ -1,14 +1,14 @@
 {
   "manga": {
-    "title": "Ghost Stories",
-    "url": "https://comix.to/title/z3ljj-ghost-stories",
-    "cover": "https://static.comix.to/73eb/i/a/0b/68deb16406a3f.jpg",
-    "description": "A collection of short comedy horror stories made by Kousuke Oono.\n\n1. Hai Byouin (Abandoned Hospital)\n2. Awase Kyou (Opposite Mirrors)\n3. K.R.S\n4. Taxi",
+    "title": "ZOMBIES",
+    "url": "https://comix.to/title/jr8k6-zombies",
+    "cover": "https://static.comix.to/8b78/i/5/c4/68deae8882780.jpg",
+    "description": "A different perspective on the zombie apocalypse.",
     "type": "other",
     "language": "ja",
     "status": "finished",
     "year": 2017,
-    "latest_chapter": 4,
+    "latest_chapter": 2,
     "genres": [
       "Comedy",
       "Horror"
@@ -22,60 +22,35 @@
   },
   "chapters": [
     {
-      "chapter_id": 1619256,
+      "chapter_id": 1694852,
       "number": 1,
-      "name": "Abandoned Hospital",
-      "scanlation_group": "Baby One more Time",
-      "language": "en",
-      "pages_count": 6,
-      "images": [
-        "https://j24n.wowpic4.store/ii/bEqPbYfoNT0GmkXlahKfrDps2rUBV/1.webp",
-        "https://j24n.wowpic4.store/ii/bEqPbYfoNT0GmkXlahKfrDps2rUBV/2.webp",
-        "https://j24n.wowpic4.store/ii/bEqPbYfoNT0GmkXlahKfrDps2rUBV/3.webp",
-        "https://j24n.wowpic4.store/ii/bEqPbYfoNT0GmkXlahKfrDps2rUBV/4.webp",
-        "https://j24n.wowpic4.store/ii/bEqPbYfoNT0GmkXlahKfrDps2rUBV/5.webp",
-        "https://j24n.wowpic4.store/ii/bEqPbYfoNT0GmkXlahKfrDps2rUBV/6.webp"
-      ]
-    },
-    {
-      "chapter_id": 1619319,
-      "number": 2,
-      "name": "Opposite Mirrors",
-      "scanlation_group": "Baby One more Time",
-      "language": "en",
-      "pages_count": 3,
-      "images": [
-        "https://j24n.wowpic2.store/ii/bEqPbYfoNT0GmxHlFjqfrDps2rURU/1.webp",
-        "https://j24n.wowpic2.store/ii/bEqPbYfoNT0GmxHlFjqfrDps2rURU/2.webp",
-        "https://j24n.wowpic2.store/ii/bEqPbYfoNT0GmxHlFjqfrDps2rURU/3.webp"
-      ]
-    },
-    {
-      "chapter_id": 1619375,
-      "number": 3,
-      "name": "K.R.S",
-      "scanlation_group": "Baby One more Time",
-      "language": "en",
-      "pages_count": 3,
-      "images": [
-        "https://80pd.wowpic4.store/ii/bEqPbYfoKT0Gmy3lQiKfrDps2rkJU/1.webp",
-        "https://80pd.wowpic4.store/ii/bEqPbYfoKT0Gmy3lQiKfrDps2rkJU/2.webp",
-        "https://80pd.wowpic4.store/ii/bEqPbYfoKT0Gmy3lQiKfrDps2rkJU/3.webp"
-      ]
-    },
-    {
-      "chapter_id": 1619473,
-      "number": 4,
-      "name": "Taxi",
+      "name": "Become a Zombie",
       "scanlation_group": "Baby One more Time",
       "language": "en",
       "pages_count": 5,
       "images": [
-        "https://jloo.wowpic5.store/ii/bEqPbYfoMT0Gmm3ldiafrDps2r0FZ/1.webp",
-        "https://jloo.wowpic5.store/ii/bEqPbYfoMT0Gmm3ldiafrDps2r0FZ/2.webp",
-        "https://jloo.wowpic5.store/ii/bEqPbYfoMT0Gmm3ldiafrDps2r0FZ/3.webp",
-        "https://jloo.wowpic5.store/ii/bEqPbYfoMT0Gmm3ldiafrDps2r0FZ/4.webp",
-        "https://jloo.wowpic5.store/ii/bEqPbYfoMT0Gmm3ldiafrDps2r0FZ/5.webp"
+        "https://jdpw.wowpic4.store/ii/bEqPbYfoKT0Gmz3lCmKfrD5YyrUNZ/1.webp",
+        "https://jdpw.wowpic4.store/ii/bEqPbYfoKT0Gmz3lCmKfrD5YyrUNZ/2.webp",
+        "https://jdpw.wowpic4.store/ii/bEqPbYfoKT0Gmz3lCmKfrD5YyrUNZ/3.webp",
+        "https://jdpw.wowpic4.store/ii/bEqPbYfoKT0Gmz3lCmKfrD5YyrUNZ/4.webp",
+        "https://jdpw.wowpic4.store/ii/bEqPbYfoKT0Gmz3lCmKfrD5YyrUNZ/5.webp"
+      ]
+    },
+    {
+      "chapter_id": 1695419,
+      "number": 2,
+      "name": "Hello?",
+      "scanlation_group": "Baby One more Time",
+      "language": "en",
+      "pages_count": 7,
+      "images": [
+        "https://ek10.wowpic2.store/ii/bEqPbYfoMT0Gmz3lL0qfrD5Y1qENY/1.webp",
+        "https://ek10.wowpic2.store/ii/bEqPbYfoMT0Gmz3lL0qfrD5Y1qENY/2.webp",
+        "https://ek10.wowpic2.store/ii/bEqPbYfoMT0Gmz3lL0qfrD5Y1qENY/3.webp",
+        "https://ek10.wowpic2.store/ii/bEqPbYfoMT0Gmz3lL0qfrD5Y1qENY/4.webp",
+        "https://ek10.wowpic2.store/ii/bEqPbYfoMT0Gmz3lL0qfrD5Y1qENY/5.webp",
+        "https://ek10.wowpic2.store/ii/bEqPbYfoMT0Gmz3lL0qfrD5Y1qENY/6.webp",
+        "https://ek10.wowpic2.store/ii/bEqPbYfoMT0Gmz3lL0qfrD5Y1qENY/7.webp"
       ]
     }
   ]
