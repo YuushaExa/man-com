@@ -58,26 +58,34 @@ jobs:
       - name: Parse Summary
         id: summary
         run: |
-          # Debug: show what's in output.log
-          echo "=== Debug: output.log contents ==="
+          # Debug: show raw output.log lines
+          echo "=== Debug: output.log summary lines ==="
           grep -E '⏱️|📥|📦|🔗' output.log || echo "No matches found"
-          echo "=================================="
+          echo "========================================"
           
-          # Parse from output.log (matches basic.js console output format)
-          DURATION=$(grep -oP '⏱️\s*Total time:\s*\K[0-9.]+' output.log | head -1)
-          DOWNLOADS=$(grep -oP '📥\s*Downloads:\s*\K[0-9]+' output.log | head -1)
-          TOTAL_OUTPUT=$(grep -oP '📦\s*Total output size:\s*\K[0-9.]+' output.log | head -1)
-          MANGA_ID=$(grep -oP '🔗\s*Manga:\s*\K[a-zA-Z0-9_-]+' output.log | head -1)
-          CHAPTER=$(grep -oP '🔗\s*Manga:.*•\s*Ch\.\K[0-9]+' output.log | head -1)
+          # Parse from output.log
+          DURATION=$(grep -oP '⏱️\s*Total time:\s*\K[0-9.]+' output.log | head -1 | xargs)
+          DOWNLOADS=$(grep -oP '📥\s*Downloads:\s*\K[0-9]+' output.log | head -1 | xargs)
+          TOTAL_OUTPUT=$(grep -oP '📦\s*Total output size:\s*\K[0-9.]+' output.log | head -1 | xargs)
           
-          # Fallback defaults (ensure empty = 0, not empty string)
+          # More flexible manga parsing (handle different bullet characters)
+          MANGA_LINE=$(grep '🔗 Manga' output.log | head -1)
+          MANGA_ID=$(echo "$MANGA_LINE" | sed -n 's/.*Manga: \([a-zA-Z0-9_-]*\).*/\1/p' | xargs)
+          CHAPTER=$(echo "$MANGA_LINE" | sed -n 's/.*Ch\.\([0-9]*\).*/\1/p' | xargs)
+          
+          # Fallback defaults
           DURATION=${DURATION:-0}
           DOWNLOADS=${DOWNLOADS:-0}
           TOTAL_OUTPUT=${TOTAL_OUTPUT:-0}
           MANGA_ID=${MANGA_ID:-N/A}
           CHAPTER=${CHAPTER:-0}
           
-          echo "Parsed: duration=$DURATION, downloads=$DOWNLOADS, output=$TOTAL_OUTPUT, manga=$MANGA_ID, chapter=$CHAPTER"
+          echo "Parsed values:"
+          echo "  duration=$DURATION"
+          echo "  downloads=$DOWNLOADS"
+          echo "  output=$TOTAL_OUTPUT"
+          echo "  manga_id=$MANGA_ID"
+          echo "  chapter=$CHAPTER"
           
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
           echo "downloads=$DOWNLOADS" >> $GITHUB_OUTPUT
@@ -87,8 +95,44 @@ jobs:
 
       - name: Merge status.json and list.json
         run: |
+          # Debug: show what GitHub Actions outputs are
+          echo "=== GitHub Outputs ==="
+          echo "manga_id: '${{ steps.summary.outputs.manga_id }}'"
+          echo "chapter: '${{ steps.summary.outputs.chapter }}'"
+          echo "======================"
+          
           node << 'EOF'
             const fs = require('fs');
+            
+            // Get values from GitHub Actions outputs
+            let mangaId = '${{ steps.summary.outputs.manga_id }}';
+            let chapter = parseInt('${{ steps.summary.outputs.chapter }}') || 0;
+            const newDownloads = parseFloat('${{ steps.summary.outputs.downloads }}') || 0;
+            const newDuration = parseFloat('${{ steps.summary.outputs.duration }}') || 0;
+            const newOutput = parseFloat('${{ steps.summary.outputs.total_output }}') || 0;
+            
+            console.log(`GitHub outputs: mangaId="${mangaId}", chapter=${chapter}`);
+            
+            // 🎯 Quick Fix: Fallback to data.json if GitHub outputs fail
+            if (!mangaId || mangaId === 'N/A' || mangaId.trim() === '' || chapter <= 0) {
+              console.log('⚠️ GitHub outputs invalid, reading data.json directly...');
+              try {
+                const jsonFile = '${{ github.event.inputs.json_file || 'data.json' }}';
+                const data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+                const url = data.manga?.url || '';
+                const match = url.match(/\/title\/([^-\s\/]+)/);
+                mangaId = match ? match[1] : 'N/A';
+                chapter = data.manga?.latest_chapter ?? data.manga?.latestChapter ?? data.manga?.chapter ?? 0;
+                console.log(`✅ From data.json: mangaId="${mangaId}", chapter=${chapter}`);
+              } catch (e) {
+                console.log(`❌ Failed to read data.json: ${e.message}`);
+              }
+            }
+            
+            // Trim whitespace
+            mangaId = mangaId ? mangaId.trim() : '';
+            
+            console.log(`Final values: mangaId="${mangaId}", chapter=${chapter}`);
             
             // === Update status.json (ALL cumulative stats) ===
             let status = {};
@@ -97,14 +141,9 @@ jobs:
                 status = JSON.parse(fs.readFileSync('status.json', 'utf8'));
               } catch (e) {
                 console.log('⚠️ Could not parse status.json, starting fresh');
+                status = {};
               }
             }
-            
-            // Parse as FLOATS (not strings!) - handle empty/invalid gracefully
-            const newDownloads = parseFloat('${{ steps.summary.outputs.downloads }}') || 0;
-            const newDuration = parseFloat('${{ steps.summary.outputs.duration }}') || 0;
-            const newOutput = parseFloat('${{ steps.summary.outputs.total_output }}') || 0;
-            const newChapter = parseInt('${{ steps.summary.outputs.chapter }}') || 0;
             
             // Get existing values as numbers (coerce strings to numbers)
             const oldDownloads = parseFloat(status.total_downloads) || 0;
@@ -116,7 +155,7 @@ jobs:
             status.total_downloads = oldDownloads + newDownloads;
             status.total_duration = oldDuration + newDuration;
             status.total_output = oldOutput + newOutput;
-            status.total_chapters = oldChapters + newChapter;
+            status.total_chapters = oldChapters + chapter;
             status.last_updated = new Date().toISOString();
             
             // Clean up old fields from previous workflow versions
@@ -139,33 +178,44 @@ jobs:
                 list = JSON.parse(fs.readFileSync('list.json', 'utf8'));
               } catch (e) {
                 console.log('⚠️ Could not parse list.json, starting fresh');
+                list = {};
               }
             }
             
-            const mangaId = '${{ steps.summary.outputs.manga_id }}';
-            const chapter = parseInt('${{ steps.summary.outputs.chapter }}');
+            console.log(`Current list.json: ${JSON.stringify(list)}`);
+            console.log(`Attempting update: mangaId="${mangaId}", chapter=${chapter}`);
             
-            console.log(`Debug: mangaId="${mangaId}", chapter=${chapter}`);
-            
-            if (mangaId && mangaId !== 'N/A' && chapter > 0) {
-              // Only update if chapter is higher than stored (deduplication)
+            if (mangaId && mangaId !== 'N/A' && mangaId.length > 0 && chapter > 0) {
               const existingChapter = parseInt(list[mangaId]) || 0;
+              console.log(`Existing chapter for ${mangaId}: ${existingChapter}`);
+              
               if (existingChapter < chapter) {
                 list[mangaId] = chapter;
-                console.log(`📝 Updated ${mangaId} → chapter ${chapter} (was ${existingChapter})`);
+                console.log(`📝 Updated ${mangaId} → ${chapter} (was ${existingChapter})`);
               } else {
-                console.log(`ℹ️ ${mangaId} already at ${existingChapter}, skipping`);
+                console.log(`ℹ️ ${mangaId} already at ${existingChapter}, keeping ${Math.max(existingChapter, chapter)}`);
+                list[mangaId] = Math.max(existingChapter, chapter);
               }
             } else {
-              console.log(`⚠️ Skipping list.json update: mangaId="${mangaId}", chapter=${chapter}`);
+              console.log(`⚠️ Skipping list.json update:`);
+              console.log(`   mangaId valid: ${mangaId && mangaId !== 'N/A' && mangaId.length > 0}`);
+              console.log(`   chapter valid: ${chapter > 0}`);
             }
             
             fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
             console.log('✅ Updated list.json');
-            console.log(JSON.stringify(list, null, 2));
+            console.log(`Final list.json: ${JSON.stringify(list)}`);
           EOF
           
-          # Commit changes only if files were modified
+          # Debug: show file contents before commit
+          echo "=== status.json ==="
+          cat status.json
+          echo ""
+          echo "=== list.json ==="
+          cat list.json
+          echo ""
+          
+          # Commit changes
           git add status.json list.json
           if ! git diff --cached --quiet; then
             git commit -m "chore: merge stats + update chapters [skip ci]" || true
