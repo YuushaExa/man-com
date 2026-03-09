@@ -46,195 +46,133 @@ jobs:
           npm install
 
       - name: Run downloader + Telegram sender
-        id: downloader
         env:
           TG_BOT_TOKEN: ${{ secrets.TG_BOT_TOKEN }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: |
           node basic.js \
             "${{ github.event.inputs.json_file || 'data.json' }}" \
-            "${{ github.event.inputs.optimize_images || true }}" 2>&1 | tee output.log
+            "${{ github.event.inputs.optimize_images || true }}"
 
-      - name: Parse Summary
-        id: summary
+      - name: Update list.json (String Format)
         run: |
-          echo "=== Debug: output.log summary lines ==="
-          grep -E '⏱️|📥|📦|🔗' output.log || echo "No matches found"
-          echo "========================================"
-          
-          DURATION=$(grep -oP '⏱️\s*Total time:\s*\K[0-9.]+' output.log | head -1 | xargs)
-          DOWNLOADS=$(grep -oP '📥\s*Downloads:\s*\K[0-9]+' output.log | head -1 | xargs)
-          TOTAL_OUTPUT=$(grep -oP '📦\s*Total output size:\s*\K[0-9.]+' output.log | head -1 | xargs)
-          
-          MANGA_LINE=$(grep '🔗 Manga' output.log | head -1)
-          MANGA_ID=$(echo "$MANGA_LINE" | sed -n 's/.*Manga: \([a-zA-Z0-9_-]*\).*/\1/p' | xargs)
-          CHAPTER=$(grep -oP '🔗 Manga:.*Ch\.\K[0-9.]+' output.log | head -1 | xargs)
-          CHAPTER=${CHAPTER:-$(node -p "require('./${{ github.event.inputs.json_file || 'data.json' }}')?.manga?.latest_chapter || 1")}          
-          DURATION=${DURATION:-0}
-          DOWNLOADS=${DOWNLOADS:-0}
-          TOTAL_OUTPUT=${TOTAL_OUTPUT:-0}
-          MANGA_ID=${MANGA_ID:-N/A}
-          CHAPTER=${CHAPTER:-0}
-          
-          echo "Parsed: duration=$DURATION, downloads=$DOWNLOADS, output=$TOTAL_OUTPUT, manga=$MANGA_ID, chapter=$CHAPTER"
-          
-          echo "duration=$DURATION" >> $GITHUB_OUTPUT
-          echo "downloads=$DOWNLOADS" >> $GITHUB_OUTPUT
-          echo "manga_id=$MANGA_ID" >> $GITHUB_OUTPUT
-          echo "chapter=$CHAPTER" >> $GITHUB_OUTPUT
-          echo "total_output=$TOTAL_OUTPUT" >> $GITHUB_OUTPUT
-
-      - name: Merge status.json and list.json
-        run: |
-          echo "=== GitHub Outputs ==="
-          echo "manga_id: '${{ steps.summary.outputs.manga_id }}'"
-          echo "chapter: '${{ steps.summary.outputs.chapter }}'"
-          echo "======================"
-          
           node << 'EOF'
             const fs = require('fs');
             
-            // Helper: safely parse chapter as integer
-            // Returns 1 for invalid/unknown values (so new manga get added)
-            const parseChapter = (val) => {
-              if (val === null || val === undefined) return 1;
-              const num = parseInt(String(val).trim(), 10);
-              return isNaN(num) || num < 1 ? 1 : num;
-            };
+            const jsonFile = '${{ github.event.inputs.json_file || 'data.json' }}';
             
-            // Helper: safely parse float (avoid shadowing global parseFloat)
-            const safeFloat = (val) => {
-              if (val === null || val === undefined) return 0;
-              const num = Number(String(val).trim());
-              return isNaN(num) || num < 0 ? 0 : num;
-            };
-            
-            let mangaId = '${{ steps.summary.outputs.manga_id }}';
-            let chapter = parseChapter('${{ steps.summary.outputs.chapter }}');
-            const newDownloads = safeFloat('${{ steps.summary.outputs.downloads }}');
-            const newDuration = safeFloat('${{ steps.summary.outputs.duration }}');
-            const newOutput = safeFloat('${{ steps.summary.outputs.total_output }}');
-            
-            console.log(`GitHub outputs: mangaId="${mangaId}", chapter=${chapter}`);
-            
-            // 🎯 Fallback to data.json if GitHub outputs fail
-            if (!mangaId || mangaId === 'N/A' || mangaId.trim() === '') {
-              console.log('⚠️ GitHub mangaId invalid, reading data.json...');
-              try {
-                const jsonFile = '${{ github.event.inputs.json_file || 'data.json' }}';
-                const data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
-                const url = data.manga?.url || '';
-                const match = url.match(/\/title\/([^-\s\/]+)/);
-                mangaId = match ? match[1] : 'N/A';
-              } catch (e) {
-                console.log(`❌ Failed to read data.json: ${e.message}`);
-              }
+            // ✅ Read data.json
+            let data;
+            try {
+              data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+            } catch (e) {
+              console.error(`❌ Failed to read ${jsonFile}: ${e.message}`);
+              process.exit(1);
             }
             
-            // Also fallback for chapter if still invalid
-            if (chapter < 1) {
-              console.log('⚠️ Chapter invalid, trying data.json fallback...');
-              try {
-                const jsonFile = '${{ github.event.inputs.json_file || 'data.json' }}';
-                const data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
-                const rawChapter = data.manga?.latest_chapter ?? data.manga?.latestChapter ?? data.manga?.chapter;
-                chapter = parseChapter(rawChapter);
-                console.log(`✅ From data.json: raw="${rawChapter}", parsed=${chapter}`);
-              } catch (e) {
-                console.log(`⚠️ Fallback failed, keeping chapter=${chapter}`);
-              }
+            const manga = data.manga || {};
+            
+            // ✅ Extract manga ID
+            function extractMangaId(url) {
+              if (!url) return null;
+              const match = String(url).trim().match(/\/title\/([^-\s\/]+)/);
+              return match ? match[1] : null;
             }
             
-            mangaId = mangaId ? mangaId.trim() : '';
-            console.log(`Final values: mangaId="${mangaId}", chapter=${chapter}`);
-            
-            // === Update status.json ===
-            let status = {};
-            if (fs.existsSync('status.json')) {
-              try {
-                status = JSON.parse(fs.readFileSync('status.json', 'utf8'));
-              } catch (e) {
-                console.log('⚠️ Could not parse status.json, starting fresh');
-              }
+            // ✅ Parse Chapter (for comparison only)
+            // Returns number for logic, but we store the string
+            function parseChapterToNumber(val) {
+              if (val === null || val === undefined) return null;
+              let str = String(val).trim().toLowerCase();
+              if (str === '' || str === '?' || str === 'n/a' || str === 'unknown') return null;
+              str = str.replace(',', '.'); // Handle 13,5
+              const match = str.match(/([0-9]+(?:\.[0-9]+)?)/);
+              if (!match) return null;
+              const num = parseFloat(match[1]);
+              return isNaN(num) || num < 0 ? null : num;
             }
             
-            const oldDownloads = safeFloat(status.total_downloads);
-            const oldDuration = safeFloat(status.total_duration);
-            const oldOutput = safeFloat(status.total_output);
-            const oldChapters = parseChapter(status.total_chapters);
+            // ✅ Clean Chapter String (for storage)
+            function cleanChapterString(val) {
+              if (val === null || val === undefined) return "?";
+              let str = String(val).trim();
+              if (str === '' || str.toLowerCase() === '?' || str.toLowerCase() === 'n/a') return "?";
+              // Replace comma decimal with dot for consistency
+              return str.replace(',', '.');
+            }
             
-            status.total_downloads = oldDownloads + newDownloads;
-            status.total_duration = oldDuration + newDuration;
-            status.total_output = oldOutput + newOutput;
-            status.total_chapters = oldChapters + chapter;
-            status.last_updated = new Date().toISOString();
+            const mangaId = extractMangaId(manga.url);
+            const rawChapter = manga.latest_chapter ?? manga.latestChapter ?? manga.chapter;
             
-            // Clean up old fields
-            delete status.status;
-            delete status.icon;
-            delete status.timestamp;
-            delete status.last_run;
-            delete status.latest_chapter;
-            delete status.total_output_mb;
-            delete status.summary;
+            const chapterNum = parseChapterToNumber(rawChapter);
+            const chapterStr = cleanChapterString(rawChapter);
             
-            fs.writeFileSync('status.json', JSON.stringify(status, null, 2));
-            console.log('✅ Updated status.json');
+            console.log(`📚 Manga: ${manga.title || 'Unknown'}`);
+            console.log(`🔗 ID: ${mangaId || 'N/A'}`);
+            console.log(`📖 Raw: "${rawChapter}" → Num: ${chapterNum} → Store: "${chapterStr}"`);
             
-            // === Update list.json (ensure object, default chapter=1 for unknown) ===
+            // ✅ Load list.json
             let list = {};
             if (fs.existsSync('list.json')) {
               try {
                 const parsed = JSON.parse(fs.readFileSync('list.json', 'utf8'));
                 if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
                   list = parsed;
-                  console.log(`Loaded list.json: ${JSON.stringify(list)}`);
-                } else {
-                  console.log('⚠️ list.json is array/invalid, starting fresh');
-                  list = {};
                 }
               } catch (e) {
-                console.log('⚠️ Could not parse list.json');
+                console.log('⚠️  Could not parse list.json, starting fresh');
               }
             }
             
-            console.log(`Attempting update: mangaId="${mangaId}", chapter=${chapter}`);
-            
-            if (mangaId && mangaId !== 'N/A' && mangaId.length > 0) {
-              const existingChapter = parseChapter(list[mangaId]);
-              console.log(`Existing chapter for ${mangaId}: ${existingChapter}`);
+            // ✅ Update Logic
+            if (mangaId) {
+              const existingStr = list[mangaId];
+              const existingNum = parseChapterToNumber(existingStr);
               
-              // Update if: manga not in list OR new chapter is higher
-              if (!list.hasOwnProperty(mangaId) || existingChapter < chapter) {
-                list[mangaId] = chapter;
-                console.log(`📝 ${!list.hasOwnProperty(mangaId) ? 'Added' : 'Updated'} ${mangaId} → ${chapter} (was ${existingChapter})`);
-              } else {
-                console.log(`ℹ️ ${mangaId} already at ${existingChapter}, keeping ${Math.max(existingChapter, chapter)}`);
+              let shouldUpdate = false;
+              
+              // 1. If new manga → Add
+              if (existingStr === undefined) {
+                shouldUpdate = true;
+                console.log(`📝 Added ${mangaId} → "${chapterStr}"`);
+              } 
+              // 2. If both are valid numbers → Compare numerically
+              else if (chapterNum !== null && existingNum !== null) {
+                if (chapterNum > existingNum) {
+                  shouldUpdate = true;
+                  console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was "${existingStr}")`);
+                } else {
+                  console.log(`ℹ️  ${mangaId} unchanged (${chapterNum} ≤ ${existingNum})`);
+                }
+              } 
+              // 3. If existing is unknown ("?") → Update to known
+              else if (existingNum === null && chapterNum !== null) {
+                shouldUpdate = true;
+                console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was unknown)`);
+              }
+              
+              if (shouldUpdate) {
+                // ✅ STORE AS STRING (Trimmed)
+                list[mangaId] = chapterStr;
               }
             } else {
-              console.log(`⚠️ Skipping list.json update: invalid mangaId="${mangaId}"`);
+              console.log('⚠️  Could not extract mangaId, skipping list.json update');
             }
             
-            const listContent = JSON.stringify(list, null, 2);
-            fs.writeFileSync('list.json', listContent);
-            console.log('✅ Updated list.json');
-            console.log(`Final: ${listContent}`);
+            // ✅ Write list.json
+            fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
+            console.log('✅ list.json updated (String Format)');
           EOF
-          
-          echo "=== status.json ==="
-          cat status.json
-          echo ""
-          echo "=== list.json ==="
-          cat list.json
-          echo ""
-          
-          git add status.json list.json
+
+      - name: Commit list.json changes
+        run: |
+          git add list.json
           if ! git diff --cached --quiet; then
-            git commit -m "chore: merge stats + update chapters [skip ci]" || true
+            git commit -m "chore: update tracked chapters [skip ci]" || true
             git pull --rebase origin ${{ github.ref_name }} || true
             git push origin HEAD:${{ github.ref_name }} || true
           else
-            echo "ℹ️ No changes to commit"
+            echo "ℹ️  No changes to list.json"
           fi
 
       - name: Cleanup downloaded files
@@ -245,30 +183,14 @@ jobs:
           rm -rf *_cover.jpg
           rm -rf Miren_no_Tonbo/
           find . -type d -name "*_ds" -exec rm -rf {} + 2>/dev/null || true
-          rm -f output.log
 
       - name: Summary
         if: success()
         run: |
           echo "## ✅ Process Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- 📤 Files sent directly to Telegram" >> $GITHUB_STEP_SUMMARY
-          echo "- 🗑️ No artifacts saved (Telegram delivery only)" >> $GITHUB_STEP_SUMMARY
+          echo "- 📤 Files sent to Telegram" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📊 This Run Summary" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "⏱️ Duration: ${{ steps.summary.outputs.duration }}s" >> $GITHUB_STEP_SUMMARY
-          echo "📥 Downloads: ${{ steps.summary.outputs.downloads }}" >> $GITHUB_STEP_SUMMARY
-          echo "🎨 Optimizations: ${{ steps.summary.outputs.downloads }}" >> $GITHUB_STEP_SUMMARY
-          echo "📦 Output: ${{ steps.summary.outputs.total_output }} MB" >> $GITHUB_STEP_SUMMARY
-          echo "🔗 Manga: ${{ steps.summary.outputs.manga_id }} • Ch.${{ steps.summary.outputs.chapter }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📈 Cumulative Stats (status.json)" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat status.json >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📚 Manga List (list.json)" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          cat list.json >> $GITHUB_STEP_SUMMARY
+          echo "### 📋 Tracked Chapters (list.json)" >> $GITHUB_STEP_SUMMARY
+          echo '```json' >> $GITHUB_STEP_SUMMARY
+          cat list.json 2>/dev/null || echo '{}' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
