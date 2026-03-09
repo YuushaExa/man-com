@@ -82,14 +82,20 @@ function extractMangaId(url) {
     return 'N/A';
   }
 }
-// ✅ Deduplicate chapters by number + normalized name
+
+// ✅ Better deduplication - strips punctuation & normalizes more aggressively
 function dedupeChapters(chapters) {
   const seen = new Map();
   const deduped = [];
   
   for (const ch of chapters) {
-    // Create a key: chapter number + lowercase trimmed name
-    const nameKey = (ch.name || '').toLowerCase().trim().replace(/\s+/g, ' ');
+    // Normalize: lowercase, remove ALL non-alphanumeric except spaces, collapse spaces, trim
+    const nameKey = (ch.name || '')
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, '')  // ← Remove ALL punctuation/special chars
+      .replace(/\s+/g, ' ')
+      .trim();
+    
     const key = `${ch.number}|${nameKey}`;
     
     if (seen.has(key)) {
@@ -104,6 +110,7 @@ function dedupeChapters(chapters) {
   console.log(`📋 Chapters: ${chapters.length} → ${deduped.length} after dedupe`);
   return deduped;
 }
+
 function getOptimizedFilename(originalPath) {
   const dir = path.dirname(originalPath);
   const base = path.basename(originalPath, '.webp');
