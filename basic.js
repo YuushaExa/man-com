@@ -495,7 +495,8 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
   
   console.log(`⏱️  Total time: ${duration}s`);
   console.log('═'.repeat(60));
-  
+    console.log(`🔗 Manga: ${mangaId} • Ch.${latestCh}`);
+
   // ✅ GitHub Actions summary - CLEAN version
   if (process.env.GITHUB_STEP_SUMMARY) {
     let summary = `## 📊 Summary\n`;
