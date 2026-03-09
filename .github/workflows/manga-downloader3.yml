@@ -58,23 +58,26 @@ jobs:
       - name: Parse Summary
         id: summary
         run: |
+          # Debug: show what's in output.log
+          echo "=== Debug: output.log contents ==="
+          grep -E '⏱️|📥|📦|🔗' output.log || echo "No matches found"
+          echo "=================================="
+          
           # Parse from output.log (matches basic.js console output format)
-          # Format: "⏱️  Total time: 130.5s" (note spacing)
-          DURATION=$(grep -oP '⏱️\s*Total time:\s*\K[0-9.]+' output.log | head -1 || echo "0")
+          DURATION=$(grep -oP '⏱️\s*Total time:\s*\K[0-9.]+' output.log | head -1)
+          DOWNLOADS=$(grep -oP '📥\s*Downloads:\s*\K[0-9]+' output.log | head -1)
+          TOTAL_OUTPUT=$(grep -oP '📦\s*Total output size:\s*\K[0-9.]+' output.log | head -1)
+          MANGA_ID=$(grep -oP '🔗\s*Manga:\s*\K[a-zA-Z0-9_-]+' output.log | head -1)
+          CHAPTER=$(grep -oP '🔗\s*Manga:.*•\s*Ch\.\K[0-9]+' output.log | head -1)
           
-          # Format: "📥 Downloads: 154/154 succeeded" - get first number
-          DOWNLOADS=$(grep -oP '📥\s*Downloads:\s*\K[0-9]+' output.log | head -1 || echo "0")
+          # Fallback defaults (ensure empty = 0, not empty string)
+          DURATION=${DURATION:-0}
+          DOWNLOADS=${DOWNLOADS:-0}
+          TOTAL_OUTPUT=${TOTAL_OUTPUT:-0}
+          MANGA_ID=${MANGA_ID:-N/A}
+          CHAPTER=${CHAPTER:-0}
           
-          # Format: "📦 Total output size: 49.79 MB"
-          TOTAL_OUTPUT=$(grep -oP '📦\s*Total output size:\s*\K[0-9.]+' output.log | head -1 || echo "0")
-          
-          # Format: "🔗 Manga: grljk • Ch.19" (added to basic.js printSummary)
-          MANGA_ID=$(grep -oP '🔗\s*Manga:\s*\K[a-zA-Z0-9_-]+' output.log | head -1 || echo "N/A")
-          CHAPTER=$(grep -oP '🔗\s*Manga:.*•\s*Ch\.\K[0-9]+' output.log | head -1 || echo "0")
-          
-          # Fallback defaults
-          : "${DURATION:=0}"; : "${DOWNLOADS:=0}"; : "${CHAPTER:=0}"; : "${TOTAL_OUTPUT:=0}"
-          : "${MANGA_ID:=N/A}"
+          echo "Parsed: duration=$DURATION, downloads=$DOWNLOADS, output=$TOTAL_OUTPUT, manga=$MANGA_ID, chapter=$CHAPTER"
           
           echo "duration=$DURATION" >> $GITHUB_OUTPUT
           echo "downloads=$DOWNLOADS" >> $GITHUB_OUTPUT
@@ -97,20 +100,37 @@ jobs:
               }
             }
             
+            // Parse as FLOATS (not strings!) - handle empty/invalid gracefully
             const newDownloads = parseFloat('${{ steps.summary.outputs.downloads }}') || 0;
             const newDuration = parseFloat('${{ steps.summary.outputs.duration }}') || 0;
             const newOutput = parseFloat('${{ steps.summary.outputs.total_output }}') || 0;
             const newChapter = parseInt('${{ steps.summary.outputs.chapter }}') || 0;
             
-            // Merge ALL cumulative values
-            status.total_downloads = (status.total_downloads || 0) + newDownloads;
-            status.total_duration = (status.total_duration || 0) + newDuration;
-            status.total_output = (status.total_output || 0) + newOutput;
-            status.total_chapters = (status.total_chapters || 0) + newChapter;
+            // Get existing values as numbers (coerce strings to numbers)
+            const oldDownloads = parseFloat(status.total_downloads) || 0;
+            const oldDuration = parseFloat(status.total_duration) || 0;
+            const oldOutput = parseFloat(status.total_output) || 0;
+            const oldChapters = parseFloat(status.total_chapters) || 0;
+            
+            // Merge ALL cumulative values (proper number addition)
+            status.total_downloads = oldDownloads + newDownloads;
+            status.total_duration = oldDuration + newDuration;
+            status.total_output = oldOutput + newOutput;
+            status.total_chapters = oldChapters + newChapter;
             status.last_updated = new Date().toISOString();
+            
+            // Clean up old fields from previous workflow versions
+            delete status.status;
+            delete status.icon;
+            delete status.timestamp;
+            delete status.last_run;
+            delete status.latest_chapter;
+            delete status.total_output_mb;
+            delete status.summary;
             
             fs.writeFileSync('status.json', JSON.stringify(status, null, 2));
             console.log('✅ Updated status.json');
+            console.log(JSON.stringify(status, null, 2));
             
             // === Update list.json (manga: highest chapter, deduplicated) ===
             let list = {};
@@ -125,18 +145,24 @@ jobs:
             const mangaId = '${{ steps.summary.outputs.manga_id }}';
             const chapter = parseInt('${{ steps.summary.outputs.chapter }}');
             
-            if (mangaId && mangaId !== 'N/A' && chapter) {
+            console.log(`Debug: mangaId="${mangaId}", chapter=${chapter}`);
+            
+            if (mangaId && mangaId !== 'N/A' && chapter > 0) {
               // Only update if chapter is higher than stored (deduplication)
-              if (!list[mangaId] || list[mangaId] < chapter) {
+              const existingChapter = parseInt(list[mangaId]) || 0;
+              if (existingChapter < chapter) {
                 list[mangaId] = chapter;
-                console.log(`📝 Updated ${mangaId} → chapter ${chapter}`);
+                console.log(`📝 Updated ${mangaId} → chapter ${chapter} (was ${existingChapter})`);
               } else {
-                console.log(`ℹ️ ${mangaId} already at ${list[mangaId]}, skipping`);
+                console.log(`ℹ️ ${mangaId} already at ${existingChapter}, skipping`);
               }
+            } else {
+              console.log(`⚠️ Skipping list.json update: mangaId="${mangaId}", chapter=${chapter}`);
             }
             
             fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
             console.log('✅ Updated list.json');
+            console.log(JSON.stringify(list, null, 2));
           EOF
           
           # Commit changes only if files were modified
@@ -178,4 +204,9 @@ jobs:
           echo "### 📈 Cumulative Stats (status.json)" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           cat status.json >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 📚 Manga List (list.json)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat list.json >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
