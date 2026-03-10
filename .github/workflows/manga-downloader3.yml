@@ -54,152 +54,126 @@ jobs:
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}"
 
-      - name: Extract manga metadata
-        id: extract-manga
+      - name: Update list.json (String Format)
         run: |
-          node << 'EOF' > /tmp/manga_meta.json
+          node << 'EOF'
             const fs = require('fs');
-            const jsonFile = process.env.JSON_FILE || 'data.json';
-            const data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+            
+            const jsonFile = '${{ github.event.inputs.json_file || 'data.json' }}';
+            
+            // ✅ Read data.json
+            let data;
+            try {
+              data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
+            } catch (e) {
+              console.error(`❌ Failed to read ${jsonFile}: ${e.message}`);
+              process.exit(1);
+            }
+            
             const manga = data.manga || {};
             
+            // ✅ Extract manga ID
             function extractMangaId(url) {
               if (!url) return null;
               const match = String(url).trim().match(/\/title\/([^-\s\/]+)/);
               return match ? match[1] : null;
             }
             
+            // ✅ Parse Chapter (for comparison only)
+            // Returns number for logic, but we store the string
+            function parseChapterToNumber(val) {
+              if (val === null || val === undefined) return null;
+              let str = String(val).trim().toLowerCase();
+              if (str === '' || str === '?' || str === 'n/a' || str === 'unknown') return null;
+              str = str.replace(',', '.'); // Handle 13,5
+              const match = str.match(/([0-9]+(?:\.[0-9]+)?)/);
+              if (!match) return null;
+              const num = parseFloat(match[1]);
+              return isNaN(num) || num < 0 ? null : num;
+            }
+            
+            // ✅ Clean Chapter String (for storage)
             function cleanChapterString(val) {
               if (val === null || val === undefined) return "?";
               let str = String(val).trim();
-              if (!str || ['?','n/a','unknown'].includes(str.toLowerCase())) return "?";
+              if (str === '' || str.toLowerCase() === '?' || str.toLowerCase() === 'n/a') return "?";
+              // Replace comma decimal with dot for consistency
               return str.replace(',', '.');
             }
             
             const mangaId = extractMangaId(manga.url);
             const rawChapter = manga.latest_chapter ?? manga.latestChapter ?? manga.chapter;
+            
+            const chapterNum = parseChapterToNumber(rawChapter);
             const chapterStr = cleanChapterString(rawChapter);
             
-            console.log(JSON.stringify({ mangaId, chapterStr, title: manga.title || 'Unknown' }));
-          EOF
-          META=$(cat /tmp/manga_meta.json)
-          echo "mangaId=$(echo "$META" | jq -r '.mangaId // empty')" >> $GITHUB_OUTPUT
-          echo "chapterStr=$(echo "$META" | jq -r '.chapterStr')" >> $GITHUB_OUTPUT
-          echo "title=$(echo "$META" | jq -r '.title')" >> $GITHUB_OUTPUT
-          echo "$META" > /tmp/manga_meta.json
-        env:
-          JSON_FILE: "${{ github.event.inputs.json_file || 'data.json' }}"
-
-      - name: Update list.json with smart retry
-        env:
-          JSON_FILE: "${{ github.event.inputs.json_file || 'data.json' }}"
-          MANGA_ID: "${{ steps.extract-manga.outputs.mangaId }}"
-          CHAPTER_STR: "${{ steps.extract-manga.outputs.chapterStr }}"
-          MANGA_TITLE: "${{ steps.extract-manga.outputs.title }}"
-        run: |
-          if [ -z "$MANGA_ID" ] || [ "$MANGA_ID" = "null" ]; then
-            echo "⚠️ No mangaId to update, skipping list.json"
-            exit 0
-          fi
-          
-          echo "📚 Processing: $MANGA_TITLE (ID: $MANGA_ID, Chapter: $CHAPTER_STR)"
-          
-          MAX_RETRIES=5
-          RETRY=0
-          
-          while [ $RETRY -lt $MAX_RETRIES ]; do
-            echo "🔄 Attempt $((RETRY+1))/$MAX_RETRIES: Updating list.json"
+            console.log(`📚 Manga: ${manga.title || 'Unknown'}`);
+            console.log(`🔗 ID: ${mangaId || 'N/A'}`);
+            console.log(`📖 Raw: "${rawChapter}" → Num: ${chapterNum} → Store: "${chapterStr}"`);
             
-            git fetch origin ${{ github.ref_name }}
-            
-            if git show origin/${{ github.ref_name }}:list.json > list.json 2>/dev/null; then
-              echo "📥 Loaded latest list.json from remote"
-            else
-              echo "ℹ️ list.json doesn't exist remotely, starting fresh"
-              echo "{}" > list.json
-            fi
-            
-            node << NODEEOF
-              const fs = require('fs');
-              
-              const mangaId = process.env.MANGA_ID;
-              const chapterStr = process.env.CHAPTER_STR;
-              
-              let list = {};
+            // ✅ Load list.json
+            let list = {};
+            if (fs.existsSync('list.json')) {
               try {
-                const raw = fs.readFileSync('list.json', 'utf8').trim();
-                if (raw) list = JSON.parse(raw);
+                const parsed = JSON.parse(fs.readFileSync('list.json', 'utf8'));
+                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+                  list = parsed;
+                }
               } catch (e) {
-                console.warn('⚠️ Could not parse list.json, starting fresh');
-                list = {};
+                console.log('⚠️  Could not parse list.json, starting fresh');
               }
-              
-              function parseChapterToNumber(val) {
-                if (val == null) return null;
-                let str = String(val).trim().toLowerCase();
-                if (!str || ['?','n/a','unknown'].includes(str)) return null;
-                str = str.replace(',', '.');
-                const match = str.match(/([0-9]+(?:\.[0-9]+)?)/);
-                if (!match) return null;
-                const num = parseFloat(match[1]);
-                return isNaN(num) || num < 0 ? null : num;
-              }
-              
+            }
+            
+            // ✅ Update Logic
+            if (mangaId) {
               const existingStr = list[mangaId];
               const existingNum = parseChapterToNumber(existingStr);
-              const newNum = parseChapterToNumber(chapterStr);
               
               let shouldUpdate = false;
               
+              // 1. If new manga → Add
               if (existingStr === undefined) {
                 shouldUpdate = true;
                 console.log(`📝 Added ${mangaId} → "${chapterStr}"`);
-              } else if (newNum !== null && existingNum !== null) {
-                if (newNum > existingNum) {
+              } 
+              // 2. If both are valid numbers → Compare numerically
+              else if (chapterNum !== null && existingNum !== null) {
+                if (chapterNum > existingNum) {
                   shouldUpdate = true;
                   console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was "${existingStr}")`);
                 } else {
-                  console.log(`ℹ️ ${mangaId} unchanged (${newNum} ≤ ${existingNum})`);
+                  console.log(`ℹ️  ${mangaId} unchanged (${chapterNum} ≤ ${existingNum})`);
                 }
-              } else if (existingNum === null && newNum !== null) {
+              } 
+              // 3. If existing is unknown ("?") → Update to known
+              else if (existingNum === null && chapterNum !== null) {
                 shouldUpdate = true;
                 console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was unknown)`);
-              } else {
-                console.log(`ℹ️ ${mangaId} no update needed`);
               }
               
               if (shouldUpdate) {
-                list[mangaId] = chapterStr.trim();
-                fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
-                console.log('✅ list.json prepared for commit');
-              } else {
-                if (!fs.existsSync('list.json')) {
-                  fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
-                }
+                // ✅ STORE AS STRING (Trimmed)
+                list[mangaId] = chapterStr;
               }
-            NODEEOF
+            } else {
+              console.log('⚠️  Could not extract mangaId, skipping list.json update');
+            }
             
-            git add list.json
-            if ! git diff --cached --quiet; then
-              git commit -m "chore: update ${MANGA_ID} → ${CHAPTER_STR} [skip ci]"
-              
-              if git push origin HEAD:${{ github.ref_name }}; then
-                echo "✅ Successfully pushed list.json on attempt $((RETRY+1))"
-                exit 0
-              else
-                echo "❌ Push failed (likely conflict), retrying..."
-                RETRY=$((RETRY+1))
-                sleep $((RETRY * 2))
-                continue
-              fi
-            else
-              echo "ℹ️ No changes to commit for list.json"
-              exit 0
-            fi
-          done
-          
-          echo "❌ Failed to push list.json after $MAX_RETRIES attempts"
-          exit 1
+            // ✅ Write list.json
+            fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
+            console.log('✅ list.json updated (String Format)');
+          EOF
+
+      - name: Commit list.json changes
+        run: |
+          git add list.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: update tracked chapters [skip ci]" || true
+            git pull --rebase origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }} || true
+          else
+            echo "ℹ️  No changes to list.json"
+          fi
 
       - name: Cleanup downloaded files
         run: |
