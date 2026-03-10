@@ -98,7 +98,7 @@ jobs:
 
           # Save master with proper formatting
           with open(MASTER, 'w') as f:
-              json.dump(master, f, indent=2, ensure_ascii=False, sort_keys=True)
+              json.dump(master, f, indent=2, ensure_ascii=False, sort_keys=False)
           print(f"💾 Saved {MASTER} ({len(master)} entries)")
 
           # Delete processed files
