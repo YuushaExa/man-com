@@ -16,6 +16,10 @@ on:
     paths:
       - 'data.json'
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   download-and-send:
     runs-on: ubuntu-latest
@@ -54,7 +58,6 @@ jobs:
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}"
 
-      # ✅ Extract manga metadata once (for reuse in retry loop)
       - name: Extract manga metadata
         id: extract-manga
         run: |
@@ -83,25 +86,21 @@ jobs:
             
             console.log(JSON.stringify({ mangaId, chapterStr, title: manga.title || 'Unknown' }));
           EOF
-          # Output for GitHub Actions
           META=$(cat /tmp/manga_meta.json)
           echo "mangaId=$(echo "$META" | jq -r '.mangaId // empty')" >> $GITHUB_OUTPUT
           echo "chapterStr=$(echo "$META" | jq -r '.chapterStr')" >> $GITHUB_OUTPUT
           echo "title=$(echo "$META" | jq -r '.title')" >> $GITHUB_OUTPUT
-          # Also save for shell access
           echo "$META" > /tmp/manga_meta.json
         env:
-          JSON_FILE: '${{ github.event.inputs.json_file || 'data.json' }}'
+          JSON_FILE: "${{ github.event.inputs.json_file || 'data.json' }}"
 
-      # ✅ Update list.json with smart retry (rebase from start)
       - name: Update list.json with smart retry
         env:
-          JSON_FILE: '${{ github.event.inputs.json_file || 'data.json' }}'
-          MANGA_ID: '${{ steps.extract-manga.outputs.mangaId }}'
-          CHAPTER_STR: '${{ steps.extract-manga.outputs.chapterStr }}'
-          MANGA_TITLE: '${{ steps.extract-manga.outputs.title }}'
+          JSON_FILE: "${{ github.event.inputs.json_file || 'data.json' }}"
+          MANGA_ID: "${{ steps.extract-manga.outputs.mangaId }}"
+          CHAPTER_STR: "${{ steps.extract-manga.outputs.chapterStr }}"
+          MANGA_TITLE: "${{ steps.extract-manga.outputs.title }}"
         run: |
-          # Skip if no manga ID to update
           if [ -z "$MANGA_ID" ] || [ "$MANGA_ID" = "null" ]; then
             echo "⚠️ No mangaId to update, skipping list.json"
             exit 0
@@ -115,10 +114,8 @@ jobs:
           while [ $RETRY -lt $MAX_RETRIES ]; do
             echo "🔄 Attempt $((RETRY+1))/$MAX_RETRIES: Updating list.json"
             
-            # 🔁 STEP 1: Fetch latest remote state
             git fetch origin ${{ github.ref_name }}
             
-            # 🔁 STEP 2: Reset list.json to remote version (critical for merge correctness)
             if git show origin/${{ github.ref_name }}:list.json > list.json 2>/dev/null; then
               echo "📥 Loaded latest list.json from remote"
             else
@@ -126,14 +123,12 @@ jobs:
               echo "{}" > list.json
             fi
             
-            # 🔁 STEP 3: Re-apply merge logic idempotently via Node.js
             node << NODEEOF
               const fs = require('fs');
               
               const mangaId = process.env.MANGA_ID;
               const chapterStr = process.env.CHAPTER_STR;
               
-              // Re-read list.json (now at latest remote version)
               let list = {};
               try {
                 const raw = fs.readFileSync('list.json', 'utf8').trim();
@@ -143,7 +138,6 @@ jobs:
                 list = {};
               }
               
-              // Helper: parse chapter to number for comparison
               function parseChapterToNumber(val) {
                 if (val == null) return null;
                 let str = String(val).trim().toLowerCase();
@@ -163,19 +157,19 @@ jobs:
               
               if (existingStr === undefined) {
                 shouldUpdate = true;
-                console.log(\`📝 Added \${mangaId} → "\${chapterStr}"\`);
+                console.log(`📝 Added ${mangaId} → "${chapterStr}"`);
               } else if (newNum !== null && existingNum !== null) {
                 if (newNum > existingNum) {
                   shouldUpdate = true;
-                  console.log(\`📝 Updated \${mangaId} → "\${chapterStr}" (was "\${existingStr}")\`);
+                  console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was "${existingStr}")`);
                 } else {
-                  console.log(\`ℹ️ \${mangaId} unchanged (\${newNum} ≤ \${existingNum})\`);
+                  console.log(`ℹ️ ${mangaId} unchanged (${newNum} ≤ ${existingNum})`);
                 }
               } else if (existingNum === null && newNum !== null) {
                 shouldUpdate = true;
-                console.log(\`📝 Updated \${mangaId} → "\${chapterStr}" (was unknown)\`);
+                console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was unknown)`);
               } else {
-                console.log(\`ℹ️ \${mangaId} no update needed\`);
+                console.log(`ℹ️ ${mangaId} no update needed`);
               }
               
               if (shouldUpdate) {
@@ -183,17 +177,15 @@ jobs:
                 fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
                 console.log('✅ list.json prepared for commit');
               } else {
-                // Ensure file exists even if no change
                 if (!fs.existsSync('list.json')) {
                   fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
                 }
               }
             NODEEOF
             
-            # 🔁 STEP 4: Try to commit and push
             git add list.json
             if ! git diff --cached --quiet; then
-              git commit -m "chore: update \${MANGA_ID} → \${CHAPTER_STR} [skip ci]"
+              git commit -m "chore: update ${MANGA_ID} → ${CHAPTER_STR} [skip ci]"
               
               if git push origin HEAD:${{ github.ref_name }}; then
                 echo "✅ Successfully pushed list.json on attempt $((RETRY+1))"
@@ -201,7 +193,7 @@ jobs:
               else
                 echo "❌ Push failed (likely conflict), retrying..."
                 RETRY=$((RETRY+1))
-                sleep $((RETRY * 2))  # Exponential backoff: 2s, 4s, 6s...
+                sleep $((RETRY * 2))
                 continue
               fi
             else
@@ -212,17 +204,6 @@ jobs:
           
           echo "❌ Failed to push list.json after $MAX_RETRIES attempts"
           exit 1
-
-      - name: Commit any remaining list.json changes (fallback)
-        # Only runs if the retry step didn't exit early (safety net)
-        if: always()
-        run: |
-          git add list.json 2>/dev/null || true
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: fallback list.json update [skip ci]" || true
-            git pull --rebase origin ${{ github.ref_name }} || true
-            git push origin HEAD:${{ github.ref_name }} || true
-          fi
 
       - name: Cleanup downloaded files
         run: |
