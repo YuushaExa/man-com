@@ -6,7 +6,7 @@ on:
       - main  # ← Change to your default branch
     paths:
       - 'data.json'
-      - 'list/**/*.json'  # ← Critical: trigger when new files appear in list/
+      - 'list/*.json'  # ← Critical: trigger when new files appear in list/
 
 jobs:
   process-data:
