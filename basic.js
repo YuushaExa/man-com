@@ -57,7 +57,7 @@ async function telegramSendWithRetry(apiCallFn, maxRetries = 3) {
         const waitSeconds = retryAfter ? parseInt(retryAfter) : Math.pow(2, i + 1);
         
         console.log(`⏳ Telegram rate limited, waiting ${waitSeconds}s (attempt ${i + 1}/${maxRetries})...`);
-        await new Promise(r => setTimeout(r, waitSeconds * 1000));
+        await new Promise(r => setTimeout(r, waitSeconds * 3000));
         continue;
       }
       
