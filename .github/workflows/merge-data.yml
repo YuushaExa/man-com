@@ -2,10 +2,8 @@ name: Merge and Cleanup List Data
 
 on:
   push:
-    branches:
-      - main   # Change this to your default branch (e.g., master)
     paths:
-      - 'list/*.json'  # Added: Also trigger if new files appear in list/ folder
+      - 'list/**/*.json'  # Added: Also trigger if new files appear in list/ folder
 
 jobs:
   process-data:
