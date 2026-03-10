@@ -2,8 +2,11 @@ name: Merge and Cleanup List Data
 
 on:
   push:
+    branches:
+      - main  # ← Change to your default branch
     paths:
-      - 'list/**/*.json'  # Added: Also trigger if new files appear in list/ folder
+      - 'data.json'
+      - 'list/**/*.json'  # ← Critical: trigger when new files appear in list/
 
 jobs:
   process-data:
@@ -12,8 +15,16 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout Repository
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+          fetch-depth: 0  # ← Needed for pull/rebase
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -22,88 +33,68 @@ jobs:
 
       - name: Run Merge and Cleanup Script
         run: |
-          python3 << 'EOF'
-          import os
-          import json
-          import glob
+          python3 << 'PYEOF'
+          import os, json, glob, sys
 
-          MASTER_FILE = 'list.json'
-          SOURCE_FOLDER = 'list'
-          
-          # 1. Load existing master data
-          master_data = {}
-          if os.path.exists(MASTER_FILE):
-              with open(MASTER_FILE, 'r') as f:
-                  try:
-                      master_data = json.load(f)
-                  except json.JSONDecodeError:
-                      master_data = {}
+          MASTER = 'list.json'
+          FOLDER = 'list'
 
-          # 2. Find all JSON files in the list folder
-          json_files = glob.glob(os.path.join(SOURCE_FOLDER, '*.json'))
-          
-          processed_files = []
-
-          for file_path in json_files:
+          # Load master
+          master = {}
+          if os.path.exists(MASTER):
               try:
-                  with open(file_path, 'r') as f:
+                  with open(MASTER, 'r') as f:
+                      master = json.load(f)
+              except:
+                  master = {}
+
+          # Process all JSON files in list/
+          files = glob.glob(os.path.join(FOLDER, '*.json'))
+          done = []
+
+          for fp in files:
+              try:
+                  with open(fp, 'r') as f:
                       data = json.load(f)
-                  
-                  # Each file is expected to be like {"key": "value"}
-                  for key, new_val in data.items():
-                      current_val = master_data.get(key)
-                      
-                      # Logic: Handle "?" and Numeric Comparison
-                      should_update = False
-                      
-                      if current_val == "?":
-                          # If current is unknown, accept new value (unless new is also ?)
-                          if new_val != "?":
-                              should_update = True
-                      elif new_val == "?":
-                          # If new is unknown, keep current known value
-                          should_update = False
+                  for k, new_v in data.items():
+                      cur_v = master.get(k)
+                      update = False
+                      if cur_v == "?":
+                          update = (new_v != "?")
+                      elif new_v == "?":
+                          update = False
                       else:
-                          # Both are numbers (strings representing numbers)
                           try:
-                              current_num = float(current_val)
-                              new_num = float(new_val)
-                              
-                              # Update only if new number is strictly higher
-                              if new_num > current_num:
-                                  should_update = True
-                          except ValueError:
-                              # Fallback for non-numeric strings: just update
-                              should_update = True
-                      
-                      if should_update:
-                          master_data[key] = new_val
-                  
-                  processed_files.append(file_path)
-                  
+                              if float(new_v) > float(cur_v):
+                                  update = True
+                          except:
+                              update = True  # fallback for non-numeric
+                      if update:
+                          master[k] = new_v
+                          print(f"✓ {k}: {cur_v} → {new_v}")
+                  done.append(fp)
               except Exception as e:
-                  print(f"Error processing {file_path}: {e}")
+                  print(f"⚠ Error {fp}: {e}", file=sys.stderr)
 
-          # 3. Save updated master file
-          with open(MASTER_FILE, 'w') as f:
-              json.dump(master_data, f, indent=2)
-          print(f"Updated {MASTER_FILE}")
+          # Save master
+          with open(MASTER, 'w') as f:
+              json.dump(master, f, indent=2)
+          print(f"💾 Saved {MASTER}")
 
-          # 4. Delete processed JSON files from list folder
-          for file_path in processed_files:
-              try:
-                  os.remove(file_path)
-                  print(f"Deleted {file_path}")
-              except Exception as e:
-                  print(f"Error deleting {file_path}: {e}")
-          
-          EOF
+          # Delete processed files
+          for fp in done:
+              os.remove(fp)
+              print(f"🗑 Deleted {fp}")
+          PYEOF
 
       - name: Commit and Push Changes
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
           git add list.json
-          git add list/*.json || true
-          git diff --staged --quiet || git commit -m "Auto-merge list data and cleanup"
-          git push
+          git add list/*.json 2>/dev/null || true
+          if ! git diff --cached --quiet; then
+            git commit -m "chore: merge chapters and cleanup [skip ci]"
+            git pull --rebase origin ${{ github.ref_name }} || true
+            git push origin HEAD:${{ github.ref_name }}
+          else
+            echo "ℹ️ No changes to commit"
+          fi
