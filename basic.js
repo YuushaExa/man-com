@@ -43,6 +43,30 @@ const logs = {
 };
 
 // == Helpers ==
+
+async function telegramSendWithRetry(apiCallFn, maxRetries = 3) {
+  for (let i = 0; i < maxRetries; i++) {
+    try {
+      return await apiCallFn();
+    } catch (err) {
+      const isRateLimit = err.message?.includes('429') || err.message?.includes('retry_after');
+      
+      if (isRateLimit && i < maxRetries - 1) {
+        // Extract retry_after from error if available, otherwise use exponential backoff
+        const retryAfter = err.message.match(/retry_after[:\s]+(\d+)/)?.[1];
+        const waitSeconds = retryAfter ? parseInt(retryAfter) : Math.pow(2, i + 1);
+        
+        console.log(`⏳ Telegram rate limited, waiting ${waitSeconds}s (attempt ${i + 1}/${maxRetries})...`);
+        await new Promise(r => setTimeout(r, waitSeconds * 1000));
+        continue;
+      }
+      
+      throw err; // Not a rate limit or max retries reached
+    }
+  }
+}
+
+
 function sanitize(str) {
   return (str || '').toString().replace(/[^a-zA-Z0-9._-]/g, '_');
 }
@@ -203,32 +227,37 @@ async function telegramSendPhoto(caption, photoPath, thumbPath) {
   if (!TG_BOT_TOKEN || !TG_CHAT_ID) return null;
   
   try {
-    const formData = new FormData();
-    formData.append('chat_id', TG_CHAT_ID);
-    formData.append('caption', caption);
-    formData.append('parse_mode', 'HTML');
-    
-    const photoBlob = await fs.readFile(photoPath);
-    formData.append('photo', new Blob([photoBlob]), path.basename(photoPath));
-    
-    if (thumbPath && fsSync.existsSync(thumbPath)) {
-      const thumbBlob = await fs.readFile(thumbPath);
-      formData.append('thumbnail', new Blob([thumbBlob]), path.basename(thumbPath));
-    }
-    
-    const response = await fetch(`${TG_API}${TG_BOT_TOKEN}/sendPhoto`, {
-      method: 'POST',
-      body: formData
+    // ✅ WRAP THE API CALL IN RETRY LOGIC
+    const result = await telegramSendWithRetry(async () => {
+      const formData = new FormData();
+      formData.append('chat_id', TG_CHAT_ID);
+      formData.append('caption', caption);
+      formData.append('parse_mode', 'HTML');
+      
+      const photoBlob = await fs.readFile(photoPath);
+      formData.append('photo', new Blob([photoBlob]), path.basename(photoPath));
+      
+      if (thumbPath && fsSync.existsSync(thumbPath)) {
+        const thumbBlob = await fs.readFile(thumbPath);
+        formData.append('thumbnail', new Blob([thumbBlob]), path.basename(thumbPath));
+      }
+      
+      const response = await fetch(`${TG_API}${TG_BOT_TOKEN}/sendPhoto`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'No error body');
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      const result = await response.json();
+      return result.ok ? result.result.message_id : null;
     });
     
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'No error body');
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
-    
-    const result = await response.json();
     logs.telegram.success++;
-    return result.ok ? result.result.message_id : null;
+    return result;
     
   } catch (error) {
     logs.telegram.failed.push({
@@ -246,29 +275,33 @@ async function telegramSendDocument(filePath, caption, replyToMessageId, thumbPa
   if (!TG_BOT_TOKEN || !TG_CHAT_ID) return;
   
   try {
-    const formData = new FormData();
-    formData.append('chat_id', TG_CHAT_ID);
-    formData.append('document', new Blob([await fs.readFile(filePath)]), path.basename(filePath));
-    formData.append('caption', caption);
-    formData.append('parse_mode', 'HTML');
-    
-    if (replyToMessageId) {
-      formData.append('reply_to_message_id', replyToMessageId);
-    }
-    
-    if (thumbPath && fsSync.existsSync(thumbPath)) {
-      formData.append('thumbnail', new Blob([await fs.readFile(thumbPath)]), path.basename(thumbPath));
-    }
-    
-    const response = await fetch(`${TG_API}${TG_BOT_TOKEN}/sendDocument`, {
-      method: 'POST',
-      body: formData
+    await telegramSendWithRetry(async () => {
+      const formData = new FormData();
+      formData.append('chat_id', TG_CHAT_ID);
+      formData.append('document', new Blob([await fs.readFile(filePath)]), path.basename(filePath));
+      formData.append('caption', caption);
+      formData.append('parse_mode', 'HTML');
+      
+      if (replyToMessageId) {
+        formData.append('reply_to_message_id', replyToMessageId);
+      }
+      
+      if (thumbPath && fsSync.existsSync(thumbPath)) {
+        formData.append('thumbnail', new Blob([await fs.readFile(thumbPath)]), path.basename(thumbPath));
+      }
+      
+      const response = await fetch(`${TG_API}${TG_BOT_TOKEN}/sendDocument`, {
+        method: 'POST',
+        body: formData
+      });
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'No error body');
+        throw new Error(`HTTP ${response.status}: ${errorText}`);
+      }
+      
+      return true;
     });
-    
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => 'No error body');
-      throw new Error(`HTTP ${response.status}: ${errorText}`);
-    }
     
     logs.telegram.success++;
     await new Promise(resolve => setTimeout(resolve, TG_DELAY_MS));
