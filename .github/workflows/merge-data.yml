@@ -1,6 +1,7 @@
 name: Merge and Cleanup List Data
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - main  # ← Change to your default branch
