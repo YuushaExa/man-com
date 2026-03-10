@@ -1,0 +1,2 @@
+# .gitattributes
+list.json merge=union
