@@ -175,9 +175,15 @@ jobs:
           rm -f package-lock.json
           rm -rf *_ds.zip
           rm -rf *_cover.jpg
-          rm -rf Miren_no_Tonbo/
           find . -type d -name "*_ds" -exec rm -rf {} + 2>/dev/null || true
-
+          
+      - name: Trigger Merge Workflow
+        if: success()
+        run: |
+          gh workflow run "Merge and Cleanup List Data" --ref ${{ github.ref_name }}
+        env:
+         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
       - name: Summary
         if: success()
         run: |
