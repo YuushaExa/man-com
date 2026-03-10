@@ -52,6 +52,14 @@ jobs:
           files = glob.glob(os.path.join(FOLDER, '*.json'))
           done = []
 
+          def is_numeric(v):
+              """Check if a value can be converted to float"""
+              try:
+                  float(v)
+                  return True
+              except (ValueError, TypeError):
+                  return False
+
           for fp in files:
               try:
                   with open(fp, 'r') as f:
@@ -59,27 +67,39 @@ jobs:
                   for k, new_v in data.items():
                       cur_v = master.get(k)
                       update = False
-                      if cur_v == "?":
-                          update = (new_v != "?")
+
+                      # ✅ 1. New key → always add (any value: "?", text, number, etc.)
+                      if cur_v is None:
+                          update = True
+
+                      # ✅ 2. Existing key: never downgrade to "?"
                       elif new_v == "?":
                           update = False
+
+                      # ✅ 3. Current is "?" → replace with anything (including another "?", though redundant)
+                      elif cur_v == "?":
+                          update = True
+
+                      # ✅ 4. Both numeric → keep the higher value
+                      elif is_numeric(cur_v) and is_numeric(new_v):
+                          if float(new_v) > float(cur_v):
+                              update = True
+
+                      # ✅ 5. Non-numeric or mixed types → prefer new value (store anything)
                       else:
-                          try:
-                              if float(new_v) > float(cur_v):
-                                  update = True
-                          except:
-                              update = True  # fallback for non-numeric
+                          update = True
+
                       if update:
                           master[k] = new_v
-                          print(f"✓ {k}: {cur_v} → {new_v}")
+                          print(f"✓ {k}: {repr(cur_v)} → {repr(new_v)}")
                   done.append(fp)
               except Exception as e:
                   print(f"⚠ Error {fp}: {e}", file=sys.stderr)
 
-          # Save master
+          # Save master with proper formatting
           with open(MASTER, 'w') as f:
-              json.dump(master, f, indent=2)
-          print(f"💾 Saved {MASTER}")
+              json.dump(master, f, indent=2, ensure_ascii=False, sort_keys=True)
+          print(f"💾 Saved {MASTER} ({len(master)} entries)")
 
           # Delete processed files
           for fp in done:
