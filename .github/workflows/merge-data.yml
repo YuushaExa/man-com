@@ -1,0 +1,111 @@
+name: Merge and Cleanup List Data
+
+on:
+  push:
+    branches:
+      - main   # Change this to your default branch (e.g., master)
+    paths:
+      - 'list/**/*.json'  # Added: Also trigger if new files appear in list/ folder
+
+jobs:
+  process-data:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Run Merge and Cleanup Script
+        run: |
+          python3 << 'EOF'
+          import os
+          import json
+          import glob
+
+          MASTER_FILE = 'list.json'
+          SOURCE_FOLDER = 'list'
+          
+          # 1. Load existing master data
+          master_data = {}
+          if os.path.exists(MASTER_FILE):
+              with open(MASTER_FILE, 'r') as f:
+                  try:
+                      master_data = json.load(f)
+                  except json.JSONDecodeError:
+                      master_data = {}
+
+          # 2. Find all JSON files in the list folder
+          json_files = glob.glob(os.path.join(SOURCE_FOLDER, '*.json'))
+          
+          processed_files = []
+
+          for file_path in json_files:
+              try:
+                  with open(file_path, 'r') as f:
+                      data = json.load(f)
+                  
+                  # Each file is expected to be like {"key": "value"}
+                  for key, new_val in data.items():
+                      current_val = master_data.get(key)
+                      
+                      # Logic: Handle "?" and Numeric Comparison
+                      should_update = False
+                      
+                      if current_val == "?":
+                          # If current is unknown, accept new value (unless new is also ?)
+                          if new_val != "?":
+                              should_update = True
+                      elif new_val == "?":
+                          # If new is unknown, keep current known value
+                          should_update = False
+                      else:
+                          # Both are numbers (strings representing numbers)
+                          try:
+                              current_num = float(current_val)
+                              new_num = float(new_val)
+                              
+                              # Update only if new number is strictly higher
+                              if new_num > current_num:
+                                  should_update = True
+                          except ValueError:
+                              # Fallback for non-numeric strings: just update
+                              should_update = True
+                      
+                      if should_update:
+                          master_data[key] = new_val
+                  
+                  processed_files.append(file_path)
+                  
+              except Exception as e:
+                  print(f"Error processing {file_path}: {e}")
+
+          # 3. Save updated master file
+          with open(MASTER_FILE, 'w') as f:
+              json.dump(master_data, f, indent=2)
+          print(f"Updated {MASTER_FILE}")
+
+          # 4. Delete processed JSON files from list folder
+          for file_path in processed_files:
+              try:
+                  os.remove(file_path)
+                  print(f"Deleted {file_path}")
+              except Exception as e:
+                  print(f"Error deleting {file_path}: {e}")
+          
+          EOF
+
+      - name: Commit and Push Changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add list.json
+          git add list/*.json || true
+          git diff --staged --quiet || git commit -m "Auto-merge list data and cleanup"
+          git push
