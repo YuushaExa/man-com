@@ -54,14 +54,19 @@ jobs:
             "${{ github.event.inputs.json_file || 'data.json' }}" \
             "${{ github.event.inputs.optimize_images || true }}"
 
-      - name: Update list.json (String Format)
+      - name: Update list/ folder (String Format)
         run: |
           node << 'EOF'
             const fs = require('fs');
+            const path = require('path');
             
             const jsonFile = '${{ github.event.inputs.json_file || 'data.json' }}';
+            const listDir = 'list';
             
-            // ✅ Read data.json
+            if (!fs.existsSync(listDir)) {
+              fs.mkdirSync(listDir, { recursive: true });
+            }
+            
             let data;
             try {
               data = JSON.parse(fs.readFileSync(jsonFile, 'utf8'));
@@ -72,32 +77,27 @@ jobs:
             
             const manga = data.manga || {};
             
-            // ✅ Extract manga ID
             function extractMangaId(url) {
               if (!url) return null;
               const match = String(url).trim().match(/\/title\/([^-\s\/]+)/);
               return match ? match[1] : null;
             }
             
-            // ✅ Parse Chapter (for comparison only)
-            // Returns number for logic, but we store the string
             function parseChapterToNumber(val) {
               if (val === null || val === undefined) return null;
               let str = String(val).trim().toLowerCase();
               if (str === '' || str === '?' || str === 'n/a' || str === 'unknown') return null;
-              str = str.replace(',', '.'); // Handle 13,5
+              str = str.replace(',', '.');
               const match = str.match(/([0-9]+(?:\.[0-9]+)?)/);
               if (!match) return null;
               const num = parseFloat(match[1]);
               return isNaN(num) || num < 0 ? null : num;
             }
             
-            // ✅ Clean Chapter String (for storage)
             function cleanChapterString(val) {
               if (val === null || val === undefined) return "?";
               let str = String(val).trim();
               if (str === '' || str.toLowerCase() === '?' || str.toLowerCase() === 'n/a') return "?";
-              // Replace comma decimal with dot for consistency
               return str.replace(',', '.');
             }
             
@@ -111,68 +111,62 @@ jobs:
             console.log(`🔗 ID: ${mangaId || 'N/A'}`);
             console.log(`📖 Raw: "${rawChapter}" → Num: ${chapterNum} → Store: "${chapterStr}"`);
             
-            // ✅ Load list.json
-            let list = {};
-            if (fs.existsSync('list.json')) {
+            if (!mangaId) {
+              console.log('⚠️  Could not extract mangaId, skipping update');
+              process.exit(0);
+            }
+            
+            const listFilePath = path.join(listDir, `${mangaId}.json`);
+            
+            let existingStr = undefined;
+            if (fs.existsSync(listFilePath)) {
               try {
-                const parsed = JSON.parse(fs.readFileSync('list.json', 'utf8'));
-                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                  list = parsed;
-                }
+                const existingData = JSON.parse(fs.readFileSync(listFilePath, 'utf8'));
+                existingStr = existingData[mangaId];
               } catch (e) {
-                console.log('⚠️  Could not parse list.json, starting fresh');
+                console.log(`⚠️  Could not parse ${listFilePath}, treating as new`);
               }
             }
             
-            // ✅ Update Logic
-            if (mangaId) {
-              const existingStr = list[mangaId];
-              const existingNum = parseChapterToNumber(existingStr);
-              
-              let shouldUpdate = false;
-              
-              // 1. If new manga → Add
-              if (existingStr === undefined) {
+            const existingNum = parseChapterToNumber(existingStr);
+            
+            let shouldUpdate = false;
+            
+            if (existingStr === undefined) {
+              shouldUpdate = true;
+              console.log(`📝 Added ${mangaId} → "${chapterStr}"`);
+            } 
+            else if (chapterNum !== null && existingNum !== null) {
+              if (chapterNum > existingNum) {
                 shouldUpdate = true;
-                console.log(`📝 Added ${mangaId} → "${chapterStr}"`);
-              } 
-              // 2. If both are valid numbers → Compare numerically
-              else if (chapterNum !== null && existingNum !== null) {
-                if (chapterNum > existingNum) {
-                  shouldUpdate = true;
-                  console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was "${existingStr}")`);
-                } else {
-                  console.log(`ℹ️  ${mangaId} unchanged (${chapterNum} ≤ ${existingNum})`);
-                }
-              } 
-              // 3. If existing is unknown ("?") → Update to known
-              else if (existingNum === null && chapterNum !== null) {
-                shouldUpdate = true;
-                console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was unknown)`);
+                console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was "${existingStr}")`);
+              } else {
+                console.log(`ℹ️  ${mangaId} unchanged (${chapterNum} ≤ ${existingNum})`);
               }
-              
-              if (shouldUpdate) {
-                // ✅ STORE AS STRING (Trimmed)
-                list[mangaId] = chapterStr;
-              }
-            } else {
-              console.log('⚠️  Could not extract mangaId, skipping list.json update');
+            } 
+            else if (existingNum === null && chapterNum !== null) {
+              shouldUpdate = true;
+              console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was unknown)`);
             }
             
-            // ✅ Write list.json
-            fs.writeFileSync('list.json', JSON.stringify(list, null, 2));
-            console.log('✅ list.json updated (String Format)');
+            if (shouldUpdate) {
+              const output = { [mangaId]: chapterStr };
+              fs.writeFileSync(listFilePath, JSON.stringify(output, null, 2));
+              console.log(`✅ Written: ${listFilePath}`);
+            }
+            
+            console.log('✅ list/ folder update complete');
           EOF
 
-      - name: Commit list.json changes
+      - name: Commit list/ changes
         run: |
-          git add list.json
+          git add list/*.json
           if ! git diff --cached --quiet; then
             git commit -m "chore: update tracked chapters [skip ci]" || true
             git pull --rebase origin ${{ github.ref_name }} || true
             git push origin HEAD:${{ github.ref_name }} || true
           else
-            echo "ℹ️  No changes to list.json"
+            echo "ℹ️  No changes to list/ folder"
           fi
 
       - name: Cleanup downloaded files
@@ -189,8 +183,4 @@ jobs:
         run: |
           echo "## ✅ Process Complete" >> $GITHUB_STEP_SUMMARY
           echo "- 📤 Files sent to Telegram" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 📋 Tracked Chapters (list.json)" >> $GITHUB_STEP_SUMMARY
-          echo '```json' >> $GITHUB_STEP_SUMMARY
-          cat list.json 2>/dev/null || echo '{}' >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "- 📁 Chapters stored in: list/*.json" >> $GITHUB_STEP_SUMMARY
