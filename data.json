@@ -1,17 +1,17 @@
 {
   "manga": {
-    "title": "A Bright Transfer Student",
-    "url": "https://comix.to/title/2zgmn-a-bright-transfer-student",
-    "cover": "https://static.comix.to/c0b3/i/2/9a/696edcf02f55a.jpg",
+    "title": "Like a Mother Bird",
+    "url": "https://comix.to/title/mrn6y-like-a-mother-bird",
+    "cover": "https://static.comix.to/5b3a/i/0/b0/699d083f1eaa6.jpg",
     "description": "No description available.",
     "type": "other",
     "language": "ja",
     "status": "finished",
-    "year": 2025,
+    "year": 2026,
     "latest_chapter": "?",
     "genres": [
       "Drama",
-      "Sci-Fi",
+      "Horror",
       "Slice of Life"
     ],
     "authors": [
@@ -23,21 +23,23 @@
   },
   "chapters": [
     {
-      "chapter_id": 7528146,
+      "chapter_id": 8329788,
       "number": 0,
       "name": null,
       "scanlation_group": "Soukyuu Scans",
       "language": "en",
-      "pages_count": 8,
+      "pages_count": 10,
       "images": [
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/1.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/2.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/3.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/4.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/5.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/6.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/7.webp",
-        "https://jloo.wowpic3.store/ii/bEqPbYfoPT0Gmy3lY06fuApo3rkZe/8.webp"
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/01.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/02.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/03.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/04.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/05.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/06.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/07.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/08.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/09.webp",
+        "https://j24n.wowpic5.store/ii/bEqPbYfoNT0GmzXlOi6fhBJQ1oUJZ/10.webp"
       ]
     }
   ]
