@@ -1,4 +1,4 @@
-name: Manga Downloader → Telegram
+name: Personal Downloader → T
 
 on:
   workflow_dispatch:
@@ -76,9 +76,9 @@ jobs:
               process.exit(1);
             }
             
-            const manga = data.manga || {};
+            const ga = data.ga || {};
             
-            function extractMangaId(url) {
+            function extractgaId(url) {
               if (!url) return null;
               const match = String(url).trim().match(/\/title\/([^-\s\/]+)/);
               return match ? match[1] : null;
@@ -102,28 +102,28 @@ jobs:
               return str.replace(',', '.');
             }
             
-            const mangaId = extractMangaId(manga.url);
-            const rawChapter = manga.latest_chapter ?? manga.latestChapter ?? manga.chapter;
+            const gaId = extractgaId(ga.url);
+            const rawChapter = ga.latest_chapter ?? ga.latestChapter ?? ga.chapter;
             
             const chapterNum = parseChapterToNumber(rawChapter);
             const chapterStr = cleanChapterString(rawChapter);
             
-            console.log(`📚 Manga: ${manga.title || 'Unknown'}`);
-            console.log(`🔗 ID: ${mangaId || 'N/A'}`);
+            console.log(`📚 ga: ${ga.title || 'Unknown'}`);
+            console.log(`🔗 ID: ${gaId || 'N/A'}`);
             console.log(`📖 Raw: "${rawChapter}" → Num: ${chapterNum} → Store: "${chapterStr}"`);
             
-            if (!mangaId) {
-              console.log('⚠️  Could not extract mangaId, skipping update');
+            if (!gaId) {
+              console.log('⚠️  Could not extract gaId, skipping update');
               process.exit(0);
             }
             
-            const listFilePath = path.join(listDir, `${mangaId}.json`);
+            const listFilePath = path.join(listDir, `${gaId}.json`);
             
             let existingStr = undefined;
             if (fs.existsSync(listFilePath)) {
               try {
                 const existingData = JSON.parse(fs.readFileSync(listFilePath, 'utf8'));
-                existingStr = existingData[mangaId];
+                existingStr = existingData[gaId];
               } catch (e) {
                 console.log(`⚠️  Could not parse ${listFilePath}, treating as new`);
               }
@@ -135,23 +135,23 @@ jobs:
             
             if (existingStr === undefined) {
               shouldUpdate = true;
-              console.log(`📝 Added ${mangaId} → "${chapterStr}"`);
+              console.log(`📝 Added ${gaId} → "${chapterStr}"`);
             } 
             else if (chapterNum !== null && existingNum !== null) {
               if (chapterNum > existingNum) {
                 shouldUpdate = true;
-                console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was "${existingStr}")`);
+                console.log(`📝 Updated ${gaId} → "${chapterStr}" (was "${existingStr}")`);
               } else {
-                console.log(`ℹ️  ${mangaId} unchanged (${chapterNum} ≤ ${existingNum})`);
+                console.log(`ℹ️  ${gaId} unchanged (${chapterNum} ≤ ${existingNum})`);
               }
             } 
             else if (existingNum === null && chapterNum !== null) {
               shouldUpdate = true;
-              console.log(`📝 Updated ${mangaId} → "${chapterStr}" (was unknown)`);
+              console.log(`📝 Updated ${gaId} → "${chapterStr}" (was unknown)`);
             }
             
             if (shouldUpdate) {
-              const output = { [mangaId]: chapterStr };
+              const output = { [gaId]: chapterStr };
               fs.writeFileSync(listFilePath, JSON.stringify(output, null, 2));
               console.log(`✅ Written: ${listFilePath}`);
             }
@@ -184,10 +184,3 @@ jobs:
           gh workflow run "Merge and Cleanup List Data" --ref ${{ github.ref_name }}
         env:
          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
-      - name: Summary
-        if: success()
-        run: |
-          echo "## ✅ Process Complete" >> $GITHUB_STEP_SUMMARY
-          echo "- 📤 Files sent to Telegram" >> $GITHUB_STEP_SUMMARY
-          echo "- 📁 Chapters stored in: list/*.json" >> $GITHUB_STEP_SUMMARY
