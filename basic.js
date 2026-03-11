@@ -97,7 +97,7 @@ const toArray = (val) => {
   return [val];
 };
 
-function extractMangaId(url) {
+function extractgaId(url) {
   if (!url) return 'N/A';
   try {
     const match = url.trim().match(/\/title\/([^-\s\/]+)/);
@@ -317,7 +317,7 @@ async function telegramSendDocument(filePath, caption, replyToMessageId, thumbPa
   }
 }
 
-async function sendMangaInfo(manga, coverPath, displayTitle) {
+async function sendgaInfo(ga, coverPath, displayTitle) {
   if (!TG_BOT_TOKEN || !TG_CHAT_ID) {
     console.log('⚠️  Telegram not configured (missing TG_BOT_TOKEN or TG_CHAT_ID)');
     return null;
@@ -331,25 +331,25 @@ async function sendMangaInfo(manga, coverPath, displayTitle) {
   };
   
   const titleHtml = escapeHtml(displayTitle);
-  const descRaw = manga.description || '';
+  const descRaw = ga.description || '';
   const description = escapeHtml(descRaw.substring(0, 800)) + (descRaw.length > 800 ? '...' : '');
   
   const caption = `<b>${titleHtml}</b>\n` +
     `${description}\n` +
-    `🏷️ <b>Type:</b> ${escapeHtml(manga.type || 'N/A')}\n` +
-    `🌐 <b>Language:</b> ${escapeHtml(manga.language || 'N/A')}\n` +
-    `📊 <b>Status:</b> ${escapeHtml(manga.status || 'N/A')}\n` +
-    `📅 <b>Year:</b> ${escapeHtml(manga.year || 'N/A')}\n` +
-    `🔢 <b>Latest Chapter:</b> ${escapeHtml(manga.latest_chapter || 'N/A')}` +
-    formatList(toArray(manga.genres), '🎭 <b>Genres</b>') +
-    formatList(toArray(manga.authors), '✍️ <b>Authors</b>') +
-    formatList(toArray(manga.artists), '🎨 <b>Artists</b>');
+    `🏷️ <b>Type:</b> ${escapeHtml(ga.type || 'N/A')}\n` +
+    `🌐 <b>Language:</b> ${escapeHtml(ga.language || 'N/A')}\n` +
+    `📊 <b>Status:</b> ${escapeHtml(ga.status || 'N/A')}\n` +
+    `📅 <b>Year:</b> ${escapeHtml(ga.year || 'N/A')}\n` +
+    `🔢 <b>Latest Chapter:</b> ${escapeHtml(ga.latest_chapter || 'N/A')}` +
+    formatList(toArray(ga.genres), '🎭 <b>Genres</b>') +
+    formatList(toArray(ga.authors), '✍️ <b>Authors</b>') +
+    formatList(toArray(ga.artists), '🎨 <b>Artists</b>');
   
-  console.log('📤 Sending manga info to Telegram...');
+  console.log('📤 Sending ga info to Telegram...');
   const messageId = await telegramSendPhoto(caption, coverPath, coverPath);
   
   if (messageId) {
-    console.log(`✅ Manga info sent (message_id: ${messageId})`);
+    console.log(`✅ ga info sent (message_id: ${messageId})`);
   }
   return messageId;
 }
@@ -518,7 +518,7 @@ async function processChapter(chapter, baseDir, displayTitle) {
   return { success: true, chapter: chapterNum };
 }
 
-function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A', displayTitle = 'N/A') {
+function printSummary(startTime, zipFiles = [], gaId = 'N/A', latestCh = 'N/A', displayTitle = 'N/A') {
   const duration = ((Date.now() - startTime) / 1000).toFixed(1);
   
   console.log('\n' + '═'.repeat(60));
@@ -575,7 +575,7 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
   
   console.log(`⏱️  Total time: ${duration}s`);
   console.log('═'.repeat(60));
-  console.log(`🔗 Manga: ${displayTitle} • Ch.${latestCh}`);
+  console.log(`🔗 ga: ${displayTitle} • Ch.${latestCh}`);
 
   if (process.env.GITHUB_STEP_SUMMARY) {
     let summary = `## 📊 Summary\n`;
@@ -589,7 +589,7 @@ function printSummary(startTime, zipFiles = [], mangaId = 'N/A', latestCh = 'N/A
       summary += `- 📤 Telegram: ${logs.telegram.success}/${tgTotal} sent\n`;
     }
     
-    summary += `- 🔗 Manga: \`${escapeHtml(displayTitle)}\` • Ch.\`${latestCh}\`\n`;
+    summary += `- 🔗 ga: \`${escapeHtml(displayTitle)}\` • Ch.\`${latestCh}\`\n`;
     
     if (zipFiles.length > 0) {
       const totalZipSize = zipFiles.reduce((sum, z) => {
@@ -629,18 +629,18 @@ async function run() {
   console.log(`🚀 Started at ${new Date().toISOString()}`);
   
   const data = JSON.parse(await fs.readFile(JSON_FILE, 'utf8'));
-  const manga = data.manga;
+  const ga = data.ga;
     const chapters = dedupeChapters(data.chapters);
   
-  const displayTitle = manga.title || 'Unknown';
+  const displayTitle = ga.title || 'Unknown';
   const safeTitle = sanitize(displayTitle);
   
   console.log(`📚 Downloading: ${displayTitle}`);
   
   let coverPath = null;
-  if (manga.cover && TG_BOT_TOKEN) {
+  if (ga.cover && TG_BOT_TOKEN) {
     coverPath = path.join(__dirname, `${safeTitle}_cover.jpg`);
-    const curlCmd = `curl -sL -o "${coverPath}" "${manga.cover}" --retry 3 --connect-timeout 30`;
+    const curlCmd = `curl -sL -o "${coverPath}" "${ga.cover}" --retry 3 --connect-timeout 30`;
     try {
       execSync(curlCmd, { stdio: 'pipe' });
       console.log('🖼️  Cover downloaded for Telegram thumbnail');
@@ -667,7 +667,7 @@ async function run() {
   
   let infoMessageId = null;
   if (TG_BOT_TOKEN && TG_CHAT_ID) {
-    infoMessageId = await sendMangaInfo(manga, coverPath, displayTitle);
+    infoMessageId = await sendgaInfo(ga, coverPath, displayTitle);
     
     const totalSize = await calculateTotalSize(zipFiles);
     
@@ -696,9 +696,9 @@ async function run() {
     zipFiles.forEach(z => console.log(`   - ${z.name}`));
   }
   
- const mangaId = extractMangaId(manga.url);
-  const latestCh = manga.latest_chapter ?? manga.latestChapter ?? 'N/A';
-  printSummary(startTime, zipFiles, mangaId, latestCh, displayTitle);
+ const gaId = extractgaId(ga.url);
+  const latestCh = ga.latest_chapter ?? ga.latestChapter ?? 'N/A';
+  printSummary(startTime, zipFiles, gaId, latestCh, displayTitle);
 
   // 🔴 Exit with error if any failures occurred (for GitHub Actions)
   if (hasFailures()) {
